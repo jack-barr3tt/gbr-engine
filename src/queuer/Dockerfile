@@ -3,8 +3,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go env -w GOPROXY=https://proxy.golang.org
 RUN go mod download
-COPY src/queuer ./queuer
-WORKDIR /src/queuer
+COPY src/ ./src/
+WORKDIR /src/src/queuer
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /queuer ./
 
 FROM scratch
