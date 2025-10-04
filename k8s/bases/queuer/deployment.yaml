@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queuer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: queuer
+  template:
+    metadata:
+      labels:
+        app: queuer
+    spec:
+      containers:
+        - name: queuer
+          image: queuer:dev
+          ports:
+            - containerPort: 3000
+          # Pull all env vars from the 'secrets' Secret (stringData) created by skaffold
+          envFrom:
+            - secretRef:
+                name: secrets

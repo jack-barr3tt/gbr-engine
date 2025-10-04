@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/go-stomp/stomp/v3"
-	"github.com/joho/godotenv"
 )
 
 type MsgType string
@@ -70,11 +69,6 @@ func UnmarshalTrustMessages(data string) ([]TrustMessage, error) {
 }
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
 	url := os.Getenv("NR_FEEDS_ENDPOINT")
 	username := os.Getenv("NR_FEEDS_USERNAME")
 	password := os.Getenv("NR_FEEDS_PASSWORD")
