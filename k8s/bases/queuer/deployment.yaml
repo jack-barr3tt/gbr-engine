@@ -12,11 +12,25 @@ spec:
       labels:
         app: queuer
     spec:
+      initContainers:
+        - name: wait-for-rabbitmq
+          image: busybox
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until nc -z rabbitmq 5672; do
+                echo "waiting for rabbitmq..."
+                sleep 2
+              done
       containers:
         - name: queuer
           image: queuer:dev
           ports:
             - containerPort: 3000
+          env:
+            - name: RABBITMQ_HOST
+              value: rabbitmq:5672
           # Pull all env vars from the 'secrets' Secret (stringData) created by skaffold
           envFrom:
             - secretRef:
