@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/go-stomp/stomp/v3"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type MsgType string
@@ -69,6 +70,22 @@ func UnmarshalTrustMessages(data string) ([]TrustMessage, error) {
 }
 
 func main() {
+	mqUser := os.Getenv("MQ_USER")
+	mqPassword := os.Getenv("MQ_PASSWORD")
+	mqHost := os.Getenv("MQ_HOST")
+	mqPort := os.Getenv("MQ_PORT")
+
+	connection, err := amqp.Dial(fmt.Sprintf("amqp://%s:%s@%s:%s/", mqUser, mqPassword, mqHost, mqPort))
+	if err != nil {
+		log.Fatal(err)
+	}
+	channel, err := connection.Channel()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer connection.Close()
+	defer channel.Close()
+
 	url := os.Getenv("NR_FEEDS_ENDPOINT")
 	username := os.Getenv("NR_FEEDS_USERNAME")
 	password := os.Getenv("NR_FEEDS_PASSWORD")
@@ -103,6 +120,23 @@ func main() {
 			continue
 		}
 
-		fmt.Println("Received", len(messages), "messages")
+		for _, message := range messages {
+			body, _ := json.Marshal(message)
+			err = channel.Publish(
+				"",
+				"trust",
+				false,
+				false,
+				amqp.Publishing{
+					ContentType: "application/json",
+					Body:        body,
+				},
+			)
+			if err != nil {
+				log.Println("Error publishing message to RabbitMQ:", err)
+			}
+
+			fmt.Printf("Published %[1]s message for train %[2]s to RabbitMQ\n", message.Header.MsgType, message.Body.TrainID)
+		}
 	}
 }

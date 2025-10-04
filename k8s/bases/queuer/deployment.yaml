@@ -29,8 +29,20 @@ spec:
           ports:
             - containerPort: 3000
           env:
-            - name: RABBITMQ_HOST
-              value: rabbitmq:5672
+            - name: MQ_HOST
+              value: rabbitmq
+            - name: MQ_PORT
+              value: "5672"
+            - name: MQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: MQ_USER
+            - name: MQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: MQ_PASSWORD
           # Pull all env vars from the 'secrets' Secret (stringData) created by skaffold
           envFrom:
             - secretRef:
