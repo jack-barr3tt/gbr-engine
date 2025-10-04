@@ -1,17 +1,98 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 
+	"github.com/jack-barr3tt/gbr-engine/src/queuer/listener"
 	"github.com/jack-barr3tt/gbr-engine/src/utils"
 
-	"github.com/go-stomp/stomp/v3"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+func HandleTrust(channel *amqp.Channel, data string) {
+	messages, err := utils.UnmarshalTrustMessages(data)
+	if err != nil {
+		log.Println("Error unmarshalling message:", err)
+		return
+	}
+
+	for _, message := range messages {
+		body, _ := json.Marshal(message)
+		err = channel.Publish(
+			"",
+			"trust",
+			false,
+			false,
+			amqp.Publishing{
+				ContentType: "application/json",
+				Body:        body,
+			},
+		)
+		if err != nil {
+			log.Println("Error publishing message to RabbitMQ:", err)
+		} else {
+			fmt.Println("Published message to RabbitMQ for TRUST")
+		}
+	}
+}
+
+func HandleTD(channel *amqp.Channel, data string) {
+	tdcMessages, tdsMessages, err := utils.UnmarshalTDMessages(data)
+	if err != nil {
+		log.Println("Error unmarshalling message:", err)
+		return
+	}
+
+	for _, message := range tdcMessages {
+		body, _ := json.Marshal(message)
+		err = channel.Publish(
+			"",
+			"tdc",
+			false,
+			false,
+			amqp.Publishing{
+				ContentType: "application/json",
+				Body:        body,
+			},
+		)
+		if err != nil {
+			log.Println("Error publishing message to RabbitMQ:", err)
+		} else {
+			fmt.Println("Published message to RabbitMQ for TD-C")
+		}
+	}
+
+	for _, message := range tdsMessages {
+		body, _ := json.Marshal(message)
+		err = channel.Publish(
+			"",
+			"tds",
+			false,
+			false,
+			amqp.Publishing{
+				ContentType: "application/json",
+				Body:        body,
+			},
+		)
+		if err != nil {
+			log.Println("Error publishing message to RabbitMQ:", err)
+		} else {
+			fmt.Println("Published message to RabbitMQ for TD-S")
+		}
+	}
+}
+
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	mqConn, channel, err := utils.NewRabbitConnection()
 	if err != nil {
 		log.Fatal("Failed to connect to RabbitMQ:", err)
@@ -23,47 +104,22 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to connect to NR Stomp:", err)
 	}
-	defer stompConn.Disconnect()
 
-	topic := "/topic/TRAIN_MVT_ALL_TOC"
-	sub, err := stompConn.Subscribe(topic, stomp.AckAuto)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer sub.Unsubscribe()
+	var wg sync.WaitGroup
 
-	fmt.Println("Listening for messages on topic:", topic)
+	trustListener := listener.NewListener(ctx, &wg, channel, stompConn, "TRAIN_MVT_ALL_TOC", HandleTrust)
+	tdListener := listener.NewListener(ctx, &wg, channel, stompConn, "TD_ALL_SIG_AREA", HandleTD)
 
-	for {
-		msg := <-sub.C
-		if msg.Err != nil {
-			log.Println("Error receiving message:", msg.Err)
-			continue
-		}
+	wg.Add(1)
+	go trustListener.Start()
 
-		messages, err := utils.UnmarshalTrustMessages(string(msg.Body))
-		if err != nil {
-			log.Println("Error unmarshalling message:", err)
-			continue
-		}
+	wg.Add(1)
+	go tdListener.Start()
 
-		for _, message := range messages {
-			body, _ := json.Marshal(message)
-			err = channel.Publish(
-				"",
-				"trust",
-				false,
-				false,
-				amqp.Publishing{
-					ContentType: "application/json",
-					Body:        body,
-				},
-			)
-			if err != nil {
-				log.Println("Error publishing message to RabbitMQ:", err)
-			}
+	<-ctx.Done()
+	stop()
 
-			fmt.Printf("Published %[1]s message for train %[2]s to RabbitMQ\n", message.Header.MsgType, message.Body.TrainID)
-		}
-	}
+	wg.Wait()
+
+	stompConn.Disconnect()
 }
