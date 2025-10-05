@@ -1,4 +1,4 @@
-apiVersion: skaffold/v2beta26
+apiVersion: skaffold/v2beta29
 kind: Config
 build:
   artifacts:
@@ -6,9 +6,11 @@ build:
       context: .
       docker:
         dockerfile: src/queuer/Dockerfile
+    - image: trust-consumer
+      context: .
+      docker:
+        dockerfile: src/trust-consumer/Dockerfile
 deploy:
   kubectl:
     manifests:
-      - k8s/bases/rabbitmq/service.yaml
-      - k8s/bases/rabbitmq/deployment.yaml
-      - k8s/bases/queuer/deployment.yaml
+      - k8s/rendered-manifests.yaml

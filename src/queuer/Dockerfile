@@ -3,11 +3,12 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go env -w GOPROXY=https://proxy.golang.org
 RUN go mod download
-COPY src/ ./src/
+COPY src/common/ ./src/common/
+COPY src/queuer ./src/queuer
 WORKDIR /src/src/queuer
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /queuer ./
+RUN CGO_ENABLED=0 GOOS=linux go build -o /queuer ./
 
 FROM scratch
-COPY --from=builder /queuer /queuer
+COPY --from=builder --chmod=0755 /queuer /queuer
 EXPOSE 8080
 ENTRYPOINT ["/queuer"]

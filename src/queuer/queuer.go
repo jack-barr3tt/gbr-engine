@@ -10,8 +10,8 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/jack-barr3tt/gbr-engine/src/common/utils"
 	"github.com/jack-barr3tt/gbr-engine/src/queuer/listener"
-	"github.com/jack-barr3tt/gbr-engine/src/utils"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -93,12 +93,24 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	mqConn, channel, err := utils.NewRabbitConnection()
+	mqConn, err := utils.NewRabbitConnectionOnly()
 	if err != nil {
 		log.Fatal("Failed to connect to RabbitMQ:", err)
 	}
 	defer mqConn.Close()
-	defer channel.Close()
+
+	// Create separate channels for each listener to avoid concurrency issues
+	trustChannel, err := mqConn.Channel()
+	if err != nil {
+		log.Fatal("Failed to create trust channel:", err)
+	}
+	defer trustChannel.Close()
+
+	tdChannel, err := mqConn.Channel()
+	if err != nil {
+		log.Fatal("Failed to create td channel:", err)
+	}
+	defer tdChannel.Close()
 
 	stompConn, err := utils.NewNRStompConnection()
 	if err != nil {
@@ -107,8 +119,12 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	trustListener := listener.NewListener(ctx, &wg, channel, stompConn, "TRAIN_MVT_ALL_TOC", HandleTrust)
-	tdListener := listener.NewListener(ctx, &wg, channel, stompConn, "TD_ALL_SIG_AREA", HandleTD)
+	trustListener := listener.NewListener(ctx, &wg, trustChannel, stompConn, "TRAIN_MVT_ALL_TOC", HandleTrust)
+	trustListener.DeclareQueue("trust")
+
+	tdListener := listener.NewListener(ctx, &wg, tdChannel, stompConn, "TD_ALL_SIG_AREA", HandleTD)
+	tdListener.DeclareQueue("tdc")
+	tdListener.DeclareQueue("tds")
 
 	wg.Add(1)
 	go trustListener.Start()

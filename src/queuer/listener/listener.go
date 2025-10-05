@@ -28,22 +28,34 @@ func NewListener(ctx context.Context, wg *sync.WaitGroup, channel *amqp.Channel,
 	}
 }
 
-func (l *Listener) Start() {
+func (l *Listener) DeclareQueue(name string) error {
+	_, err := l.channel.QueueDeclare(
+		name,
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	return err
+}
+
+func (l *Listener) Start() error {
 	defer l.wg.Done()
 
 	sub, err := l.stompConn.Subscribe(l.topic, stomp.AckAuto)
 	if err != nil {
-		return
+		return err
 	}
 	defer sub.Unsubscribe()
 
 	for {
 		select {
 		case <-l.ctx.Done():
-			return
+			return nil
 		case msg, ok := <-sub.C:
 			if !ok {
-				return
+				return nil
 			}
 			if msg.Err != nil {
 				continue

@@ -1,18 +1,28 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: queuer
+  name: trust-consumer
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: queuer
+      app: trust-consumer
   template:
     metadata:
       labels:
-        app: queuer
+        app: trust-consumer
     spec:
       initContainers:
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until redis-cli -h redis ping >/dev/null 2>&1; do
+                echo "waiting for redis..."
+                sleep 2
+              done
         - name: wait-for-rabbitmq
           image: busybox:1.35
           command:
@@ -24,8 +34,8 @@ spec:
                 sleep 2
               done
       containers:
-        - name: queuer
-          image: queuer:dev
+        - name: trust-consumer
+          image: trust-consumer:dev
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
@@ -34,6 +44,8 @@ spec:
               value: rabbitmq
             - name: MQ_PORT
               value: "5672"
+            - name: REDIS_ADDR
+              value: "redis:6379"
             - name: MQ_USER
               valueFrom:
                 secretKeyRef:
