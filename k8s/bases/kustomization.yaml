@@ -4,6 +4,8 @@ resources:
   - queuer/deployment.yaml
   - rabbitmq/deployment.yaml
   - rabbitmq/service.yaml
+  - redis/deployment.yaml
+  - redis/service.yaml
 
 secretGenerator:
   - name: secrets
