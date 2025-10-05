@@ -14,15 +14,16 @@ spec:
     spec:
       initContainers:
         - name: wait-for-rabbitmq
-          image: busybox:1.35
+          image: curlimages/curl:8.4.0
           command:
             - /bin/sh
             - -c
             - |
-              until nc -z rabbitmq 5672 >/dev/null 2>&1; do
-                echo "waiting for rabbitmq AMQP port..."
+              until curl -f -u guest:guest http://rabbitmq:15672/api/aliveness-test/%2F 2>/dev/null; do
+                echo "waiting for rabbitmq to be ready..."
                 sleep 2
               done
+              echo "rabbitmq is ready!"
       containers:
         - name: queuer
           image: queuer:dev

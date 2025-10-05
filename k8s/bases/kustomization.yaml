@@ -3,15 +3,24 @@ kind: Kustomization
 resources:
   - queuer/deployment.yaml
   - trust-consumer/deployment.yaml
+  - reference-data/deployment.yaml
   - rabbitmq/deployment.yaml
   - rabbitmq/service.yaml
+  - rabbitmq/configmap.yaml
   - redis/deployment.yaml
   - redis/service.yaml
+  - postgres/deployment.yaml
+  - postgres/service.yaml
 
 secretGenerator:
   - name: secrets
     envs:
       - ../../.env
+
+configMapGenerator:
+  - name: postgres-schema
+    files:
+      - schema.sql=../../schema.sql
 
 generatorOptions:
   disableNameSuffixHash: true

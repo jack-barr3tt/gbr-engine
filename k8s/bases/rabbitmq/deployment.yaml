@@ -18,9 +18,47 @@ spec:
           ports:
             - containerPort: 5672
             - containerPort: 15672
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              value: "guest"
+            - name: RABBITMQ_DEFAULT_PASS
+              value: "guest"
+            - name: RABBITMQ_VM_MEMORY_HIGH_WATERMARK
+              value: "0.8"
+            - name: RABBITMQ_DISK_FREE_LIMIT
+              value: "2GB"
+            - name: RABBITMQ_HEARTBEAT
+              value: "60"
+            - name: RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS
+              value: "-rabbit consumer_timeout 86400000"
+          volumeMounts:
+            - name: rabbitmq-config
+              mountPath: /etc/rabbitmq/rabbitmq.conf
+              subPath: rabbitmq.conf
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
           readinessProbe:
-            tcpSocket:
-              port: 5672
-            initialDelaySeconds: 5
-            periodSeconds: 3
-            failureThreshold: 5
+            httpGet:
+              path: /api/healthchecks/node
+              port: 15672
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/healthchecks/node
+              port: 15672
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: rabbitmq-config
+          configMap:
+            name: rabbitmq-config

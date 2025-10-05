@@ -1,12 +1,15 @@
 package utils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/go-stomp/stomp/v3"
 	"github.com/jack-barr3tt/gbr-engine/src/common/types"
+	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/redis/go-redis/v9"
 )
@@ -17,7 +20,12 @@ func NewRabbitConnection() (*amqp.Connection, *amqp.Channel, error) {
 	mqHost := os.Getenv("MQ_HOST")
 	mqPort := os.Getenv("MQ_PORT")
 
-	connection, err := amqp.Dial(fmt.Sprintf("amqp://%s:%s@%s:%s/", mqUser, mqPassword, mqHost, mqPort))
+	config := amqp.Config{
+		Heartbeat: 60 * time.Second,
+		Locale:    "en_US",
+	}
+
+	connection, err := amqp.DialConfig(fmt.Sprintf("amqp://%s:%s@%s:%s/", mqUser, mqPassword, mqHost, mqPort), config)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -35,7 +43,12 @@ func NewRabbitConnectionOnly() (*amqp.Connection, error) {
 	mqHost := os.Getenv("MQ_HOST")
 	mqPort := os.Getenv("MQ_PORT")
 
-	connection, err := amqp.Dial(fmt.Sprintf("amqp://%s:%s@%s:%s/", mqUser, mqPassword, mqHost, mqPort))
+	config := amqp.Config{
+		Heartbeat: 60 * time.Second,
+		Locale:    "en_US",
+	}
+
+	connection, err := amqp.DialConfig(fmt.Sprintf("amqp://%s:%s@%s:%s/", mqUser, mqPassword, mqHost, mqPort), config)
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +84,26 @@ func NewRedisClient() *redis.Client {
 	})
 
 	return rdb
+}
+
+func NewPostgresConnection() (*pgxpool.Pool, error) {
+	host := os.Getenv("POSTGRES_HOST")
+	port := os.Getenv("POSTGRES_PORT")
+	user := os.Getenv("POSTGRES_USER")
+	password := os.Getenv("POSTGRES_PASSWORD")
+	dbname := os.Getenv("POSTGRES_DB")
+
+	dbConnectionString := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		host, port, user, password, dbname,
+	)
+
+	connection, err := pgxpool.New(context.Background(), dbConnectionString)
+	if err != nil {
+		return nil, err
+	}
+
+	return connection, nil
 }
 
 func UnmarshalTrustMessages(data string) ([]types.TrustMessage, error) {

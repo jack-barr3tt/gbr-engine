@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reference-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: reference-data
+  template:
+    metadata:
+      labels:
+        app: reference-data
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:15-alpine
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: POSTGRES_PASSWORD
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until pg_isready -h postgres -U postgres -d gbr_engine; do
+                echo "waiting for postgres to be ready..."
+                sleep 2
+              done
+              echo "postgres is ready, checking if schema is applied..."
+              until psql -h postgres -U postgres -d gbr_engine -c "SELECT 1 FROM reference_fetch LIMIT 1;" >/dev/null 2>&1; do
+                echo "waiting for schema to be applied..."
+                sleep 2
+              done
+              echo "schema is ready!"
+      containers:
+        - name: reference-data
+          image: reference-data:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NR_REFERENCE_API
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: NR_REFERENCE_API
+            - name: NR_REFERENCE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: NR_REFERENCE_API_KEY
+            - name: POSTGRES_HOST
+              value: postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: gbr_engine
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: POSTGRES_PASSWORD
+          envFrom:
+            - secretRef:
+                name: secrets

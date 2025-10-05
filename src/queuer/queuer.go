@@ -16,6 +16,8 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+var mqConn *amqp.Connection
+
 func HandleTrust(channel *amqp.Channel, data string) {
 	messages, err := utils.UnmarshalTrustMessages(data)
 	if err != nil {
@@ -93,11 +95,26 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	mqConn, err := utils.NewRabbitConnectionOnly()
+	var err error
+	mqConn, err = utils.NewRabbitConnectionOnly()
 	if err != nil {
 		log.Fatal("Failed to connect to RabbitMQ:", err)
 	}
 	defer mqConn.Close()
+
+	closeChan := make(chan *amqp.Error)
+	mqConn.NotifyClose(closeChan)
+
+	go func() {
+		select {
+		case err := <-closeChan:
+			if err != nil {
+				log.Printf("RabbitMQ connection closed: %v", err)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}()
 
 	// Create separate channels for each listener to avoid concurrency issues
 	trustChannel, err := mqConn.Channel()
