@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: schedule-initializer
+  labels:
+    app: schedule-initializer
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 3600 # 1 hour timeout
+  ttlSecondsAfterFinished: 86400 # Clean up after 24 hours
+  template:
+    metadata:
+      labels:
+        app: schedule-initializer
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:15-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for postgres to be ready..."
+                sleep 2
+              done
+              echo "Postgres is ready!"
+      containers:
+        - name: schedule-initializer
+          image: schedule-initializer:latest
+          imagePullPolicy: Never
+          env:
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: "gbr_engine"
+            - name: NR_FEEDS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: NR_FEEDS_USERNAME
+            - name: NR_FEEDS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: NR_FEEDS_PASSWORD
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"

@@ -14,6 +14,10 @@ build:
       context: .
       docker:
         dockerfile: src/data-fetcher/Dockerfile
+    - image: schedule-initializer
+      context: .
+      docker:
+        dockerfile: src/schedule-initializer/Dockerfile
 deploy:
   kubectl:
     manifests:

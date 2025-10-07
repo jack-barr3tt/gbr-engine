@@ -9,6 +9,6 @@ WORKDIR /src/src/data-fetcher
 RUN CGO_ENABLED=0 GOOS=linux go build -o /data-fetcher ./
 
 FROM gcr.io/distroless/static:latest
-COPY --from=builder --chmod=0755 /data-fetcher /data-fetcher
+COPY --from=builder /data-fetcher /data-fetcher
 EXPOSE 8080
 ENTRYPOINT ["/data-fetcher"]

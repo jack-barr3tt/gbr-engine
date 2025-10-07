@@ -9,6 +9,6 @@ WORKDIR /src/src/queuer
 RUN CGO_ENABLED=0 GOOS=linux go build -o /queuer ./
 
 FROM scratch
-COPY --from=builder --chmod=0755 /queuer /queuer
+COPY --from=builder /queuer /queuer
 EXPOSE 8080
 ENTRYPOINT ["/queuer"]
