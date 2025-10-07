@@ -3,7 +3,7 @@ kind: Kustomization
 resources:
   - queuer/deployment.yaml
   - trust-consumer/deployment.yaml
-  - reference-data/deployment.yaml
+  - data-fetcher/deployment.yaml
   - rabbitmq/deployment.yaml
   - rabbitmq/service.yaml
   - rabbitmq/configmap.yaml

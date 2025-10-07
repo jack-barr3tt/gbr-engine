@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: reference-data
+  name: data-fetcher
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: reference-data
+      app: data-fetcher
   template:
     metadata:
       labels:
-        app: reference-data
+        app: data-fetcher
     spec:
       initContainers:
         - name: wait-for-postgres
@@ -36,8 +36,8 @@ spec:
               done
               echo "schema is ready!"
       containers:
-        - name: reference-data
-          image: reference-data:dev
+        - name: data-fetcher
+          image: data-fetcher:dev
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

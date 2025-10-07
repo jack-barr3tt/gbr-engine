@@ -10,10 +10,10 @@ build:
       context: .
       docker:
         dockerfile: src/trust-consumer/Dockerfile
-    - image: reference-data
+    - image: data-fetcher
       context: .
       docker:
-        dockerfile: src/reference-data/Dockerfile
+        dockerfile: src/data-fetcher/Dockerfile
 deploy:
   kubectl:
     manifests:
