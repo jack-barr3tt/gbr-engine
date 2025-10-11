@@ -126,7 +126,13 @@ func main() {
 
 		case entry.TiplocV1 != nil:
 			_, err := pg.Exec(context.Background(), `INSERT INTO tiploc (tiploc_code, nalco, stanox, crs_code, description, tps_description)
-				VALUES ($1, $2, $3, $4, $5, $6)`,
+				VALUES ($1, $2, $3, $4, $5, $6)
+				ON CONFLICT (tiploc_code) DO UPDATE SET
+					nalco = EXCLUDED.nalco,
+					stanox = EXCLUDED.stanox,
+					crs_code = EXCLUDED.crs_code,
+					description = EXCLUDED.description,
+					tps_description = EXCLUDED.tps_description`,
 				entry.TiplocV1.TiplocCode,
 				entry.TiplocV1.Nalco,
 				entry.TiplocV1.Stanox,
@@ -161,7 +167,17 @@ func main() {
 					assoc_end_date, assoc_days, category, date_indicator,
 					location, base_location_suffix, assoc_location_suffix,
 					diagram_type, stp_indicator
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+				ON CONFLICT (main_train_uid, assoc_train_uid, assoc_start_date, location, stp_indicator)
+				DO UPDATE SET
+					transaction_type = EXCLUDED.transaction_type,
+					assoc_end_date = EXCLUDED.assoc_end_date,
+					assoc_days = EXCLUDED.assoc_days,
+					category = EXCLUDED.category,
+					date_indicator = EXCLUDED.date_indicator,
+					base_location_suffix = EXCLUDED.base_location_suffix,
+					assoc_location_suffix = EXCLUDED.assoc_location_suffix,
+					diagram_type = EXCLUDED.diagram_type`,
 				assoc.TransactionType,
 				assoc.MainTrainUID,
 				assoc.AssocTrainUID,
