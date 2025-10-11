@@ -33,7 +33,10 @@ spec:
                 echo "waiting for rabbitmq to be ready..."
                 sleep 2
               done
-              echo "rabbitmq is ready!"
+              echo "rabbitmq health check passed!"
+              # Additional wait to ensure AMQP is ready
+              sleep 10
+              echo "rabbitmq should be fully ready now!"
       containers:
         - name: trust-consumer
           image: trust-consumer:dev
