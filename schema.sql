@@ -39,7 +39,10 @@ CREATE TABLE IF NOT EXISTS schedule (
   catering_code VARCHAR(4),
   service_branding VARCHAR(20),
   traction_class VARCHAR(2),
-  uic_code VARCHAR(5)
+  uic_code VARCHAR(5),
+  -- VSTP-specific columns
+  origin_msg_id VARCHAR(255),
+  schema_location VARCHAR(255)
 );
 CREATE TABLE IF NOT EXISTS schedule_location (
   id SERIAL PRIMARY KEY,
@@ -59,7 +62,9 @@ CREATE TABLE IF NOT EXISTS schedule_location (
   engineering_allowance VARCHAR(2),
   pathing_allowance VARCHAR(2),
   performance_allowance VARCHAR(2),
-  location_order INT NOT NULL
+  location_order INT NOT NULL,
+  -- VSTP-specific columns
+  activity VARCHAR(10)
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_location_schedule_id ON schedule_location (schedule_id);
 CREATE INDEX IF NOT EXISTS idx_schedule_location_tiploc ON schedule_location (tiploc_code);

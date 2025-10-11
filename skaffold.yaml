@@ -10,6 +10,10 @@ build:
       context: .
       docker:
         dockerfile: src/trust-consumer/Dockerfile
+    - image: vstp-consumer
+      context: .
+      docker:
+        dockerfile: src/vstp-consumer/Dockerfile
     - image: data-fetcher
       context: .
       docker:

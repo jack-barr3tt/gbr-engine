@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-stomp/stomp/v3"
@@ -155,4 +156,47 @@ func UnmarshalTDMessages(data string) ([]types.TDCMsgBody, []types.TDSMsgBody, e
 	}
 
 	return tdCMsgs, tdSMsgs, nil
+}
+
+func UnmarshalVSTP(jsonStr string) (*types.VSTPMessage, error) {
+	var vstpMsg types.VSTPMessage
+	err := json.Unmarshal([]byte(jsonStr), &vstpMsg)
+	if err != nil {
+		return nil, err
+	}
+	return &vstpMsg, nil
+}
+
+func NullString(s string) *string {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func ParseTime(timeStr string) *time.Time {
+	trimmed := strings.TrimSpace(timeStr)
+	if trimmed == "" || trimmed == "      " {
+		return nil
+	}
+
+	if len(trimmed) == 6 {
+		if t, err := time.Parse("150405", trimmed); err == nil {
+			return &t
+		}
+	}
+
+	return nil
+}
+
+func ParseIntOrZero(s string) int {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return 0
+	}
+
+	var result int
+	fmt.Sscanf(trimmed, "%d", &result)
+	return result
 }

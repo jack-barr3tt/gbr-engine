@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - queuer/deployment.yaml
   - trust-consumer/deployment.yaml
+  - vstp-consumer/deployment.yaml
   - data-fetcher/deployment.yaml
   - schedule-initializer/job.yaml
   - rabbitmq/deployment.yaml

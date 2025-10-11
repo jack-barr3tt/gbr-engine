@@ -91,6 +91,31 @@ func HandleTD(channel *amqp.Channel, data string) {
 	}
 }
 
+func HandleVSTP(channel *amqp.Channel, data string) {
+	message, err := utils.UnmarshalVSTP(data)
+	if err != nil {
+		log.Println("Error unmarshalling VSTP message:", err)
+		return
+	}
+
+	body, _ := json.Marshal(message)
+	err = channel.Publish(
+		"",
+		"vstp",
+		false,
+		false,
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        body,
+		},
+	)
+	if err != nil {
+		log.Println("Error publishing message to RabbitMQ:", err)
+	} else {
+		fmt.Println("Published message to RabbitMQ for VSTP")
+	}
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -129,6 +154,12 @@ func main() {
 	}
 	defer tdChannel.Close()
 
+	vstpChannel, err := mqConn.Channel()
+	if err != nil {
+		log.Fatal("Failed to create vstp channel:", err)
+	}
+	defer vstpChannel.Close()
+
 	stompConn, err := utils.NewNRStompConnection()
 	if err != nil {
 		log.Fatal("Failed to connect to NR Stomp:", err)
@@ -143,11 +174,17 @@ func main() {
 	tdListener.DeclareQueue("tdc")
 	tdListener.DeclareQueue("tds")
 
+	vstpListener := listener.NewListener(ctx, &wg, vstpChannel, stompConn, "VSTP_ALL", HandleVSTP)
+	vstpListener.DeclareQueue("vstp")
+
 	wg.Add(1)
 	go trustListener.Start()
 
 	wg.Add(1)
 	go tdListener.Start()
+
+	wg.Add(1)
+	go vstpListener.Start()
 
 	<-ctx.Done()
 	stop()
