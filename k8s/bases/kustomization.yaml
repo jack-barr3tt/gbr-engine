@@ -6,6 +6,8 @@ resources:
   - vstp-consumer/deployment.yaml
   - data-fetcher/deployment.yaml
   - schedule-initializer/job.yaml
+  - http-api/deployment.yaml
+  - http-api/service.yaml
   - rabbitmq/deployment.yaml
   - rabbitmq/service.yaml
   - rabbitmq/configmap.yaml

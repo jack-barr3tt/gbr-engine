@@ -1,0 +1,55 @@
+openapi: "3.0.0"
+info:
+  title: GBR Engine API
+  version: "1.0.0"
+paths:
+  /hello:
+    get:
+      summary: Hello World endpoint
+      description: Returns a simple hello world message
+      operationId: getHello
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HelloResponse"
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns the health status of the API
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+components:
+  schemas:
+    HelloResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "Hello, World!"
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - message
+        - timestamp
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "healthy"
+        version:
+          type: string
+          example: "1.0.0"
+      required:
+        - status
+        - version

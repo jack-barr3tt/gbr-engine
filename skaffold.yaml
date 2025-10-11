@@ -22,6 +22,10 @@ build:
       context: .
       docker:
         dockerfile: src/schedule-initializer/Dockerfile
+    - image: http-api
+      context: .
+      docker:
+        dockerfile: src/http-api/Dockerfile
 deploy:
   kubectl:
     manifests:
