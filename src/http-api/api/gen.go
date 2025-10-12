@@ -4,10 +4,20 @@
 package api
 
 import (
-	"time"
+	"fmt"
+	"net/url"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+// ErrorResponse defines model for ErrorResponse.
+type ErrorResponse struct {
+	Error   string  `json:"error"`
+	Message string  `json:"message"`
+	Stack   *string `json:"stack,omitempty"`
+}
 
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
@@ -15,10 +25,43 @@ type HealthResponse struct {
 	Version string `json:"version"`
 }
 
-// HelloResponse defines model for HelloResponse.
-type HelloResponse struct {
-	Message   string    `json:"message"`
-	Timestamp time.Time `json:"timestamp"`
+// NotFoundResponse defines model for NotFoundResponse.
+type NotFoundResponse struct {
+	Error string `json:"error"`
+}
+
+// ScheduleLocation defines model for ScheduleLocation.
+type ScheduleLocation struct {
+	Arrival         *string `json:"arrival,omitempty"`
+	Departure       *string `json:"departure,omitempty"`
+	Id              int     `json:"id"`
+	LocationOrder   int     `json:"location_order"`
+	LocationType    string  `json:"location_type"`
+	Platform        *string `json:"platform,omitempty"`
+	PublicArrival   *string `json:"public_arrival,omitempty"`
+	PublicDeparture *string `json:"public_departure,omitempty"`
+	TiplocCode      string  `json:"tiploc_code"`
+}
+
+// ServiceResponse defines model for ServiceResponse.
+type ServiceResponse struct {
+	AtocCode          *string             `json:"atoc_code,omitempty"`
+	Headcode          string              `json:"headcode"`
+	Id                int                 `json:"id"`
+	Locations         []ScheduleLocation  `json:"locations"`
+	ScheduleDaysRuns  *string             `json:"schedule_days_runs,omitempty"`
+	ScheduleEndDate   *openapi_types.Date `json:"schedule_end_date,omitempty"`
+	ScheduleStartDate *openapi_types.Date `json:"schedule_start_date,omitempty"`
+	SignallingId      string              `json:"signalling_id"`
+	TrainCategory     *string             `json:"train_category,omitempty"`
+	TrainStatus       *string             `json:"train_status,omitempty"`
+	TrainUid          string              `json:"train_uid"`
+}
+
+// GetServiceParams defines parameters for GetService.
+type GetServiceParams struct {
+	// Headcode The headcode of the services to retrieve
+	Headcode string `form:"headcode" json:"headcode"`
 }
 
 // ServerInterface represents all server handlers.
@@ -26,9 +69,9 @@ type ServerInterface interface {
 	// Health check endpoint
 	// (GET /health)
 	GetHealth(c *fiber.Ctx) error
-	// Hello World endpoint
-	// (GET /hello)
-	GetHello(c *fiber.Ctx) error
+	// Get services by headcode
+	// (GET /service)
+	GetService(c *fiber.Ctx, params GetServiceParams) error
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -44,10 +87,36 @@ func (siw *ServerInterfaceWrapper) GetHealth(c *fiber.Ctx) error {
 	return siw.Handler.GetHealth(c)
 }
 
-// GetHello operation middleware
-func (siw *ServerInterfaceWrapper) GetHello(c *fiber.Ctx) error {
+// GetService operation middleware
+func (siw *ServerInterfaceWrapper) GetService(c *fiber.Ctx) error {
 
-	return siw.Handler.GetHello(c)
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetServiceParams
+
+	var query url.Values
+	query, err = url.ParseQuery(string(c.Request().URI().QueryString()))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for query string: %w", err).Error())
+	}
+
+	// ------------- Required query parameter "headcode" -------------
+
+	if paramValue := c.Query("headcode"); paramValue != "" {
+
+	} else {
+		err = fmt.Errorf("Query argument headcode is required, but not found")
+		c.Status(fiber.StatusBadRequest).JSON(err)
+		return err
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "headcode", query, &params.Headcode)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter headcode: %w", err).Error())
+	}
+
+	return siw.Handler.GetService(c, params)
 }
 
 // FiberServerOptions provides options for the Fiber server.
@@ -73,6 +142,6 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 
 	router.Get(options.BaseURL+"/health", wrapper.GetHealth)
 
-	router.Get(options.BaseURL+"/hello", wrapper.GetHello)
+	router.Get(options.BaseURL+"/service", wrapper.GetService)
 
 }

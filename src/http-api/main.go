@@ -17,7 +17,11 @@ func main() {
 	app.Use(logger.New())
 	app.Use(cors.New())
 
-	server := api.NewServer()
+	server, err := api.NewServer()
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
 
 	api.RegisterHandlers(app, server)
 

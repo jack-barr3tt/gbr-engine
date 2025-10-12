@@ -3,18 +3,6 @@ info:
   title: GBR Engine API
   version: "1.0.0"
 paths:
-  /hello:
-    get:
-      summary: Hello World endpoint
-      description: Returns a simple hello world message
-      operationId: getHello
-      responses:
-        "200":
-          description: Successful response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HelloResponse"
   /health:
     get:
       summary: Health check endpoint
@@ -27,20 +15,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /service:
+    get:
+      summary: Get services by headcode
+      description: Returns schedule information for all services with the given headcode
+      operationId: getService
+      parameters:
+        - name: headcode
+          in: query
+          required: true
+          description: The headcode of the services to retrieve
+          schema:
+            type: string
+            example: "1B73"
+      responses:
+        "200":
+          description: Services found
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ServiceResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No services found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotFoundResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
-    HelloResponse:
-      type: object
-      properties:
-        message:
-          type: string
-          example: "Hello, World!"
-        timestamp:
-          type: string
-          format: date-time
-      required:
-        - message
-        - timestamp
     HealthResponse:
       type: object
       properties:
@@ -53,3 +75,110 @@ components:
       required:
         - status
         - version
+    ServiceResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 107343
+        train_uid:
+          type: string
+          example: "Y81836"
+        signalling_id:
+          type: string
+          example: "1B73"
+        headcode:
+          type: string
+          example: "1273"
+        train_category:
+          type: string
+          example: "XX"
+        schedule_start_date:
+          type: string
+          format: date
+          example: "2025-10-11"
+        schedule_end_date:
+          type: string
+          format: date
+          example: "2025-10-11"
+        schedule_days_runs:
+          type: string
+          example: "0000010"
+        train_status:
+          type: string
+          example: "P"
+        atoc_code:
+          type: string
+          example: "LE"
+        locations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScheduleLocation"
+      required:
+        - id
+        - train_uid
+        - signalling_id
+        - headcode
+        - locations
+    ScheduleLocation:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1816240
+        location_type:
+          type: string
+          example: "LO"
+        tiploc_code:
+          type: string
+          example: "STANAIR"
+        arrival:
+          type: string
+          format: time
+          example: "14:43:00.000000"
+        public_arrival:
+          type: string
+          format: time
+          example: "14:43:00.000000"
+        departure:
+          type: string
+          format: time
+          example: "14:43:00.000000"
+        public_departure:
+          type: string
+          format: time
+          example: "14:43:00.000000"
+        platform:
+          type: string
+          example: "1"
+        location_order:
+          type: integer
+          example: 1
+      required:
+        - id
+        - location_type
+        - tiploc_code
+        - location_order
+    NotFoundResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "No services found"
+      required:
+        - error
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Database error"
+        message:
+          type: string
+          example: "Failed to connect to database"
+        stack:
+          type: string
+          example: "error at line 42 in service.go"
+      required:
+        - error
+        - message

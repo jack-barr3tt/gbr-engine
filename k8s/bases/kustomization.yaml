@@ -8,6 +8,7 @@ resources:
   - schedule-initializer/job.yaml
   - http-api/deployment.yaml
   - http-api/service.yaml
+  - http-api/ingress.yaml
   - rabbitmq/deployment.yaml
   - rabbitmq/service.yaml
   - rabbitmq/configmap.yaml
