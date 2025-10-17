@@ -61,6 +61,73 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /services-at-location:
+    get:
+      summary: Get services currently at a location
+      description: Returns all train services currently at a specific location based on real-time train tracking data. Specify exactly one of the location parameters.
+      operationId: getServicesAtLocation
+      parameters:
+        - name: name
+          in: query
+          required: false
+          description: The station name to search for trains at
+          schema:
+            type: string
+            example: "London Paddington"
+        - name: crs
+          in: query
+          required: false
+          description: The CRS code of the station to search for trains at
+          schema:
+            type: string
+            example: "PAD"
+        - name: tiploc
+          in: query
+          required: false
+          description: The TIPLOC code of the location to search for trains at
+          schema:
+            type: string
+            example: "PADTON"
+        - name: stanox
+          in: query
+          required: false
+          description: The STANOX code of the location to search for trains at
+          schema:
+            type: string
+            example: "87544"
+        - name: date
+          in: query
+          required: false
+          description: The date to search for services (YYYY-MM-DD format). Defaults to today.
+          schema:
+            type: string
+            format: date
+            example: "2025-10-12"
+      responses:
+        "200":
+          description: Services at location found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationServicesResponse"
+        "400":
+          description: Bad request - must specify exactly one location parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Location not found or no services at location
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotFoundResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthResponse:
@@ -159,6 +226,43 @@ components:
         - location_type
         - tiploc_code
         - location_order
+    LocationServicesResponse:
+      type: object
+      properties:
+        location:
+          type: object
+          properties:
+            search_term:
+              type: string
+              example: "London Paddington"
+            search_type:
+              type: string
+              example: "name"
+            name:
+              type: string
+              example: "London Paddington"
+            stanox:
+              type: string
+              example: "87544"
+            crs_code:
+              type: string
+              example: "PAD"
+            tiploc_codes:
+              type: array
+              items:
+                type: string
+              example: ["PADTON", "PADTNJN"]
+          required:
+            - search_term
+            - search_type
+            - stanox
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceResponse"
+      required:
+        - location
+        - services
     NotFoundResponse:
       type: object
       properties:

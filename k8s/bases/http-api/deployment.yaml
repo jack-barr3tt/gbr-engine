@@ -24,6 +24,17 @@ spec:
                 sleep 2
               done
               echo "PostgreSQL is ready!"
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until redis-cli -h redis -p 6379 ping; do
+                echo "Waiting for redis..."
+                sleep 2
+              done
+              echo "Redis is ready!"
       containers:
         - name: http-api
           image: http-api
@@ -46,6 +57,8 @@ spec:
                 secretKeyRef:
                   name: secrets
                   key: POSTGRES_PASSWORD
+            - name: REDIS_ADDR
+              value: "redis:6379"
           livenessProbe:
             httpGet:
               path: /health

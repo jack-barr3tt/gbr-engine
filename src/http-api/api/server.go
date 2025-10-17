@@ -5,10 +5,12 @@ import (
 
 	"github.com/jack-barr3tt/gbr-engine/src/common/utils"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 type APIServer struct {
-	DB *pgxpool.Pool
+	DB    *pgxpool.Pool
+	Redis *redis.Client
 }
 
 func NewServer() (*APIServer, error) {
@@ -18,7 +20,10 @@ func NewServer() (*APIServer, error) {
 		return nil, err
 	}
 
+	redis := utils.NewRedisClient()
+
 	return &APIServer{
-		DB: db,
+		DB:    db,
+		Redis: redis,
 	}, nil
 }

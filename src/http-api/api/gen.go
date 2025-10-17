@@ -25,6 +25,19 @@ type HealthResponse struct {
 	Version string `json:"version"`
 }
 
+// LocationServicesResponse defines model for LocationServicesResponse.
+type LocationServicesResponse struct {
+	Location struct {
+		CrsCode     *string   `json:"crs_code,omitempty"`
+		Name        *string   `json:"name,omitempty"`
+		SearchTerm  string    `json:"search_term"`
+		SearchType  string    `json:"search_type"`
+		Stanox      string    `json:"stanox"`
+		TiplocCodes *[]string `json:"tiploc_codes,omitempty"`
+	} `json:"location"`
+	Services []ServiceResponse `json:"services"`
+}
+
 // NotFoundResponse defines model for NotFoundResponse.
 type NotFoundResponse struct {
 	Error string `json:"error"`
@@ -64,6 +77,24 @@ type GetServiceParams struct {
 	Headcode string `form:"headcode" json:"headcode"`
 }
 
+// GetServicesAtLocationParams defines parameters for GetServicesAtLocation.
+type GetServicesAtLocationParams struct {
+	// Name The station name to search for trains at
+	Name *string `form:"name,omitempty" json:"name,omitempty"`
+
+	// Crs The CRS code of the station to search for trains at
+	Crs *string `form:"crs,omitempty" json:"crs,omitempty"`
+
+	// Tiploc The TIPLOC code of the location to search for trains at
+	Tiploc *string `form:"tiploc,omitempty" json:"tiploc,omitempty"`
+
+	// Stanox The STANOX code of the location to search for trains at
+	Stanox *string `form:"stanox,omitempty" json:"stanox,omitempty"`
+
+	// Date The date to search for services (YYYY-MM-DD format). Defaults to today.
+	Date *openapi_types.Date `form:"date,omitempty" json:"date,omitempty"`
+}
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Health check endpoint
@@ -72,6 +103,9 @@ type ServerInterface interface {
 	// Get services by headcode
 	// (GET /service)
 	GetService(c *fiber.Ctx, params GetServiceParams) error
+	// Get services currently at a location
+	// (GET /services-at-location)
+	GetServicesAtLocation(c *fiber.Ctx, params GetServicesAtLocationParams) error
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -119,6 +153,58 @@ func (siw *ServerInterfaceWrapper) GetService(c *fiber.Ctx) error {
 	return siw.Handler.GetService(c, params)
 }
 
+// GetServicesAtLocation operation middleware
+func (siw *ServerInterfaceWrapper) GetServicesAtLocation(c *fiber.Ctx) error {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetServicesAtLocationParams
+
+	var query url.Values
+	query, err = url.ParseQuery(string(c.Request().URI().QueryString()))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for query string: %w", err).Error())
+	}
+
+	// ------------- Optional query parameter "name" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "name", query, &params.Name)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter name: %w", err).Error())
+	}
+
+	// ------------- Optional query parameter "crs" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "crs", query, &params.Crs)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter crs: %w", err).Error())
+	}
+
+	// ------------- Optional query parameter "tiploc" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "tiploc", query, &params.Tiploc)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter tiploc: %w", err).Error())
+	}
+
+	// ------------- Optional query parameter "stanox" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "stanox", query, &params.Stanox)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter stanox: %w", err).Error())
+	}
+
+	// ------------- Optional query parameter "date" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "date", query, &params.Date)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter date: %w", err).Error())
+	}
+
+	return siw.Handler.GetServicesAtLocation(c, params)
+}
+
 // FiberServerOptions provides options for the Fiber server.
 type FiberServerOptions struct {
 	BaseURL     string
@@ -143,5 +229,7 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 	router.Get(options.BaseURL+"/health", wrapper.GetHealth)
 
 	router.Get(options.BaseURL+"/service", wrapper.GetService)
+
+	router.Get(options.BaseURL+"/services-at-location", wrapper.GetServicesAtLocation)
 
 }
