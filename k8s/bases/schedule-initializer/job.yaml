@@ -28,8 +28,7 @@ spec:
               echo "Postgres is ready!"
       containers:
         - name: schedule-initializer
-          image: schedule-initializer:latest
-          imagePullPolicy: Never
+          image: schedule-initializer
           env:
             - name: POSTGRES_HOST
               value: "postgres"

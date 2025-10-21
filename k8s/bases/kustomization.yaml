@@ -14,8 +14,10 @@ resources:
   - rabbitmq/configmap.yaml
   - redis/deployment.yaml
   - redis/service.yaml
+  - redis/pvc.yaml
   - postgres/deployment.yaml
   - postgres/service.yaml
+  - postgres/pvc.yaml
 
 secretGenerator:
   - name: secrets

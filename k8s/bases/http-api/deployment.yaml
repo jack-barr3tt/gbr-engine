@@ -38,7 +38,6 @@ spec:
       containers:
         - name: http-api
           image: http-api
-          imagePullPolicy: Never
           ports:
             - containerPort: 3000
           env:

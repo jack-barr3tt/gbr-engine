@@ -37,8 +37,7 @@ spec:
               echo "schema is ready!"
       containers:
         - name: data-fetcher
-          image: data-fetcher:dev
-          imagePullPolicy: IfNotPresent
+          image: data-fetcher
           ports:
             - containerPort: 3000
           env:

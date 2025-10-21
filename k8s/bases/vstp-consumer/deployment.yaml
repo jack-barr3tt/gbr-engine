@@ -46,8 +46,7 @@ spec:
               echo "rabbitmq should be fully ready now!"
       containers:
         - name: vstp-consumer
-          image: vstp-consumer:dev
-          imagePullPolicy: IfNotPresent
+          image: vstp-consumer
           env:
             - name: MQ_HOST
               value: rabbitmq

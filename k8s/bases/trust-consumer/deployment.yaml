@@ -39,8 +39,7 @@ spec:
               echo "rabbitmq should be fully ready now!"
       containers:
         - name: trust-consumer
-          image: trust-consumer:dev
-          imagePullPolicy: IfNotPresent
+          image: trust-consumer
           ports:
             - containerPort: 3000
           env:
@@ -50,6 +49,14 @@ spec:
               value: "5672"
             - name: REDIS_ADDR
               value: "redis:6379"
+            - name: POSTGRES_HOST
+              value: postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: gbr_engine
+            - name: POSTGRES_USER
+              value: postgres
             - name: MQ_USER
               valueFrom:
                 secretKeyRef:
@@ -60,6 +67,11 @@ spec:
                 secretKeyRef:
                   name: secrets
                   key: MQ_PASSWORD
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: POSTGRES_PASSWORD
           envFrom:
             - secretRef:
                 name: secrets

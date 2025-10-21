@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jack-barr3tt/gbr-engine/src/common/types"
 	"github.com/jack-barr3tt/gbr-engine/src/common/utils"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -23,6 +25,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+
+	rdb := utils.NewRedisClient()
+	defer rdb.Close()
 
 	conn, channel, err := utils.NewRabbitConnection()
 	if err != nil {
@@ -50,7 +55,7 @@ func main() {
 			continue
 		}
 
-		if err := processVSTPMessage(ctx, db, &vstpMsg); err != nil {
+		if err := processVSTPMessage(ctx, db, rdb, &vstpMsg); err != nil {
 			log.Printf("Error processing VSTP message: %v", err)
 			continue
 		}
@@ -59,10 +64,9 @@ func main() {
 	}
 }
 
-func processVSTPMessage(ctx context.Context, db *pgxpool.Pool, vstpMsg *types.VSTPMessage) error {
+func processVSTPMessage(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, vstpMsg *types.VSTPMessage) error {
 	schedule := &vstpMsg.VSTPCIFMsgV1.Schedule
 
-	// Parse dates
 	startDate, err := time.Parse("2006-01-02", schedule.ScheduleStartDate)
 	if err != nil {
 		return fmt.Errorf("invalid start date: %v", err)
@@ -141,7 +145,44 @@ func processVSTPMessage(ctx context.Context, db *pgxpool.Pool, vstpMsg *types.VS
 		}
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	runDate := strings.ReplaceAll(schedule.ScheduleStartDate, "-", "")
+	trainUID := strings.TrimSpace(schedule.TrainUID)
+
+	var stops []types.Stop
+	for _, segment := range schedule.ScheduleSegment {
+		for _, loc := range segment.ScheduleLocation {
+			var stanox string
+			tiplocID := loc.Location.Tiploc.TiplocId
+			tiplocKey := utils.BuildTiplocKey(tiplocID)
+			err := rdb.Get(ctx, tiplocKey).Scan(&stanox)
+			if err != nil {
+				dbErr := db.QueryRow(ctx, `SELECT stanox FROM tiploc WHERE tiploc_code = $1`, tiplocID).Scan(&stanox)
+				if dbErr != nil || stanox == "" {
+					continue
+				}
+				rdb.Set(ctx, tiplocKey, stanox, 7*24*time.Hour)
+			}
+
+			plannedArr := utils.FormatPlannedTime(loc.ScheduledArrivalTime)
+			plannedDep := utils.FormatPlannedTime(loc.ScheduledDepartureTime)
+			stops = append(stops, types.Stop{Stanox: stanox, PlannedArr: plannedArr, PlannedDep: plannedDep})
+		}
+	}
+
+	journey := types.TrainJourney{UID: trainUID, RunDate: runDate, Stops: stops}
+	b, _ := json.Marshal(journey)
+	key := utils.BuildScheduleKey(trainUID, runDate)
+	if err := rdb.Set(ctx, key, b, 72*time.Hour).Err(); err != nil {
+		log.Printf("Failed to write schedule to Redis for %s: %v", schedule.TrainUID, err)
+	} else {
+		fmt.Printf("Wrote schedule to Redis: %s\n", key)
+	}
+
+	return nil
 }
 
 func insertScheduleLocation(ctx context.Context, tx pgx.Tx, scheduleID int, location *types.VSTPScheduleLocation, order int) error {
@@ -155,15 +196,15 @@ func insertScheduleLocation(ctx context.Context, tx pgx.Tx, scheduleID int, loca
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 		)`,
 		scheduleID,
-		"LO", // Default location type for VSTP
-		"LO", // Default record identity for VSTP
+		"LO",
+		"LO",
 		location.Location.Tiploc.TiplocId,
-		nil, // tiploc_instance
-		utils.ParseTime(location.ScheduledArrivalTime),   // arrival
-		utils.ParseTime(location.PublicArrivalTime),      // public_arrival
-		utils.ParseTime(location.ScheduledDepartureTime), // departure
-		utils.ParseTime(location.PublicDepartureTime),    // public_departure
-		utils.ParseTime(location.ScheduledPassTime),      // pass
+		nil,
+		utils.ParseTime(location.ScheduledArrivalTime),
+		utils.ParseTime(location.PublicArrivalTime),
+		utils.ParseTime(location.ScheduledDepartureTime),
+		utils.ParseTime(location.PublicDepartureTime),
+		utils.ParseTime(location.ScheduledPassTime),
 		utils.NullString(location.Platform),
 		utils.NullString(location.Line),
 		utils.NullString(location.Path),

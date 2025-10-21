@@ -29,8 +29,7 @@ spec:
               echo "rabbitmq should be fully ready now!"
       containers:
         - name: queuer
-          image: queuer:dev
-          imagePullPolicy: IfNotPresent
+          image: queuer
           ports:
             - containerPort: 3000
           env:

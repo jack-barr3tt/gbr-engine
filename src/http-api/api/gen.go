@@ -45,15 +45,26 @@ type NotFoundResponse struct {
 
 // ScheduleLocation defines model for ScheduleLocation.
 type ScheduleLocation struct {
+	// ActualArrival Actual arrival time from TRUST feed (if available)
+	ActualArrival *string `json:"actual_arrival,omitempty"`
+
+	// ActualDeparture Actual departure time from TRUST feed (if available)
+	ActualDeparture *string `json:"actual_departure,omitempty"`
 	Arrival         *string `json:"arrival,omitempty"`
+
+	// ArrivalLateness Lateness in minutes for arrival (positive = late, negative = early)
+	ArrivalLateness *int    `json:"arrival_lateness,omitempty"`
 	Departure       *string `json:"departure,omitempty"`
-	Id              int     `json:"id"`
-	LocationOrder   int     `json:"location_order"`
-	LocationType    string  `json:"location_type"`
-	Platform        *string `json:"platform,omitempty"`
-	PublicArrival   *string `json:"public_arrival,omitempty"`
-	PublicDeparture *string `json:"public_departure,omitempty"`
-	TiplocCode      string  `json:"tiploc_code"`
+
+	// DepartureLateness Lateness in minutes for departure (positive = late, negative = early)
+	DepartureLateness *int    `json:"departure_lateness,omitempty"`
+	Id                int     `json:"id"`
+	LocationOrder     int     `json:"location_order"`
+	LocationType      string  `json:"location_type"`
+	Platform          *string `json:"platform,omitempty"`
+	PublicArrival     *string `json:"public_arrival,omitempty"`
+	PublicDeparture   *string `json:"public_departure,omitempty"`
+	TiplocCode        string  `json:"tiploc_code"`
 }
 
 // ServiceResponse defines model for ServiceResponse.

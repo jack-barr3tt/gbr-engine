@@ -5,14 +5,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jack-barr3tt/gbr-engine/src/common/types"
 	"github.com/jack-barr3tt/gbr-engine/src/common/utils"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
 	ctx := context.Background()
+
+	db, err := utils.NewPostgresConnection()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
 
 	rdb := utils.NewRedisClient()
 	defer rdb.Close()
@@ -43,26 +52,75 @@ func main() {
 			continue
 		}
 
-		if trust.Body.EventType == "ARRIVAL" || trust.Body.EventType == "DEPARTURE" {
-			key := fmt.Sprintf("train:%s", trust.Body.TrainID)
-
-			data := map[string]interface{}{
-				"train_id":        trust.Body.TrainID,
-				"event_type":      trust.Body.EventType,
-				"location_stanox": trust.Body.LocStanox,
-				"timestamp":       trust.Body.ActualTimestamp,
+		switch trust.Header.MsgType {
+		case types.TrainActivation:
+			if err := processActivation(ctx, rdb, &trust.Body); err != nil {
+				log.Printf("Error processing activation for train %s: %v", trust.Body.TrainID, err)
 			}
-
-			if err := rdb.HSet(ctx, key, data).Err(); err != nil {
-				log.Printf("Redis HSet error: %v", err)
-				continue
+		case types.TrainMovement:
+			if err := processMovement(ctx, db, rdb, &trust.Body); err != nil {
+				log.Printf("Error processing TRUST event for train %s: %v", trust.Body.TrainID, err)
 			}
-
-			// optional TTL so Redis self-cleans stale trains
-			rdb.Expire(ctx, key, 2*time.Hour)
-
-			fmt.Printf("Updated Redis: %s %s @ %s\n",
-				trust.Body.TrainID, trust.Body.EventType, trust.Body.LocStanox)
+		default:
+			continue
 		}
 	}
+}
+
+func processActivation(ctx context.Context, rdb *redis.Client, trust *types.TrustBody) error {
+	trainID := strings.TrimSpace(trust.TrainID)
+	trainUID := strings.TrimSpace(trust.TrainUID)
+
+	key := utils.BuildActivationKey(trainID)
+	err := rdb.Set(ctx, key, trainUID, 48*time.Hour).Err()
+	if err != nil {
+		return fmt.Errorf("failed to store activation: %w", err)
+	}
+
+	fmt.Printf("Stored activation: %s → %s\n", trainID, trainUID)
+	return nil
+}
+
+func processMovement(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, trust *types.TrustBody) error {
+	runDate := utils.FormatRunDate(time.Now())
+	trainID := strings.TrimSpace(trust.TrainID)
+
+	activationKey := utils.BuildActivationKey(trainID)
+	trainUID, err := rdb.Get(ctx, activationKey).Result()
+	if err != nil {
+		fmt.Printf("No activation found for train_id %s\n", trainID)
+		return nil
+	}
+
+	trainUID = strings.TrimSpace(trainUID)
+
+	journey, err := utils.LoadTrainJourney(ctx, db, rdb, trainUID, runDate)
+	if err != nil {
+		return nil
+	}
+
+	merged := utils.MergeTrustEvent(&journey, trust)
+	if !merged {
+		foundStanoxes := []string{}
+		for _, stop := range journey.Stops {
+			foundStanoxes = append(foundStanoxes, stop.Stanox)
+		}
+		fmt.Printf("No stanox match for %s (looking for %s, schedule has: %v)\n",
+			trainUID, trust.LocStanox, foundStanoxes)
+		return nil
+	}
+
+	b, err := json.Marshal(journey)
+	if err != nil {
+		return fmt.Errorf("failed to marshal journey: %w", err)
+	}
+	schedKey := utils.BuildScheduleKey(trainUID, runDate)
+	if err := rdb.Set(ctx, schedKey, b, 48*time.Hour).Err(); err != nil {
+		return fmt.Errorf("failed to save merged schedule: %w", err)
+	}
+
+	fmt.Printf("Merged TRUST into schedule: %s (%s) %s @ %s\n",
+		trainUID, trainID, trust.EventType, trust.LocStanox)
+
+	return nil
 }

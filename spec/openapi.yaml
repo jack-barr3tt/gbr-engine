@@ -221,6 +221,22 @@ components:
         location_order:
           type: integer
           example: 1
+        actual_arrival:
+          type: string
+          description: "Actual arrival time from TRUST feed (if available)"
+          example: "14:44"
+        actual_departure:
+          type: string
+          description: "Actual departure time from TRUST feed (if available)"
+          example: "14:45"
+        arrival_lateness:
+          type: integer
+          description: "Lateness in minutes for arrival (positive = late, negative = early)"
+          example: 1
+        departure_lateness:
+          type: integer
+          description: "Lateness in minutes for departure (positive = late, negative = early)"
+          example: 2
       required:
         - id
         - location_type

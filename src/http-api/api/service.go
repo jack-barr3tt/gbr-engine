@@ -34,6 +34,11 @@ func (s *APIServer) GetService(c *fiber.Ctx, params GetServiceParams) error {
 		})
 	}
 
+	ctx := c.Context()
+	for i := range services {
+		s.AddRealtimeData(ctx, &services[i], time.Now())
+	}
+
 	return c.JSON(services)
 }
 
@@ -140,7 +145,12 @@ func (s *APIServer) GetServicesAtLocation(c *fiber.Ctx, params GetServicesAtLoca
 			Stack:   &errStr,
 		})
 	}
-	
+
+	ctx := c.Context()
+	for i := range services {
+		s.AddRealtimeData(ctx, &services[i], checkDate)
+	}
+
 	response := LocationServicesResponse{
 		Services: services,
 	}

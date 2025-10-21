@@ -27,6 +27,8 @@ type TrustHeader struct {
 
 type TrustBody struct {
 	TrainID              string `json:"train_id"`
+	TrainUID             string `json:"train_uid"`
+	ScheduleStartDate    string `json:"schedule_start_date"`
 	ActualTimestamp      string `json:"actual_timestamp"`
 	LocStanox            string `json:"loc_stanox"`
 	GBTTTimestamp        string `json:"gbtt_timestamp"`

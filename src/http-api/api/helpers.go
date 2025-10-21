@@ -3,30 +3,15 @@ package api
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2/log"
+	"github.com/jack-barr3tt/gbr-engine/src/common/types"
+	"github.com/jack-barr3tt/gbr-engine/src/common/utils"
 	"github.com/jackc/pgx/v5/pgxpool"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
-
-func isScheduleValidForDate(runsOn string, startDate, endDate, checkDate time.Time) bool {
-	if checkDate.Before(startDate) || checkDate.After(endDate) {
-		return false
-	}
-
-	if len(runsOn) != 7 {
-		return false
-	}
-
-	weekday := int(checkDate.Weekday())
-	if weekday == 0 {
-		weekday = 7
-	}
-
-	dayIndex := weekday - 1
-	return runsOn[dayIndex] == '1'
-}
 
 func (s *APIServer) GetServicesByHeadcode(headcode string) ([]ServiceResponse, error) {
 	var services []ServiceResponse
@@ -72,44 +57,10 @@ func (s *APIServer) GetServicesByHeadcode(headcode string) ([]ServiceResponse, e
 		service.ScheduleStartDate = &startDate
 		service.ScheduleEndDate = &endDate
 
-		var locations []ScheduleLocation
-		locationRows, err := s.DB.Query(context.Background(), `
-			SELECT id, location_type, tiploc_code, arrival, public_arrival, 
-			       departure, public_departure, platform, location_order
-			FROM schedule_location 
-			WHERE schedule_id = $1 
-			ORDER BY location_order
-		`, service.Id)
-
+		locations, err := fetchStops(s.DB, service.Id)
 		if err != nil {
 			return nil, err
 		}
-
-		for locationRows.Next() {
-			var location ScheduleLocation
-			err := locationRows.Scan(
-				&location.Id,
-				&location.LocationType,
-				&location.TiplocCode,
-				&location.Arrival,
-				&location.PublicArrival,
-				&location.Departure,
-				&location.PublicDeparture,
-				&location.Platform,
-				&location.LocationOrder,
-			)
-			if err != nil {
-				locationRows.Close()
-				return nil, err
-			}
-			locations = append(locations, location)
-		}
-		locationRows.Close()
-
-		if err = locationRows.Err(); err != nil {
-			return nil, err
-		}
-
 		service.Locations = locations
 		services = append(services, service)
 	}
@@ -130,14 +81,12 @@ func (s *APIServer) GetStanoxByLocationName(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
 
 	type match struct {
 		stanox      string
 		description string
 		lengthDiff  int
 	}
-
 	var bestMatch *match
 
 	for rows.Next() {
@@ -311,7 +260,7 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 			return nil, err
 		}
 
-		if !isScheduleValidForDate(scheduleDaysRuns, scheduleStartDate, scheduleEndDate, date) {
+		if !utils.IsScheduleValidForDate(scheduleDaysRuns, scheduleStartDate, scheduleEndDate, date) {
 			continue
 		}
 
@@ -321,44 +270,10 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 		service.ScheduleEndDate = &endDate
 		service.ScheduleDaysRuns = &scheduleDaysRuns
 
-		var locations []ScheduleLocation
-		locationRows, err := db.Query(context.Background(), `
-			SELECT id, location_type, tiploc_code, arrival, public_arrival, 
-			       departure, public_departure, platform, location_order
-			FROM schedule_location 
-			WHERE schedule_id = $1 
-			ORDER BY location_order
-		`, service.Id)
-
+		locations, err := fetchStops(db, service.Id)
 		if err != nil {
 			return nil, err
 		}
-
-		for locationRows.Next() {
-			var location ScheduleLocation
-			err := locationRows.Scan(
-				&location.Id,
-				&location.LocationType,
-				&location.TiplocCode,
-				&location.Arrival,
-				&location.PublicArrival,
-				&location.Departure,
-				&location.PublicDeparture,
-				&location.Platform,
-				&location.LocationOrder,
-			)
-			if err != nil {
-				locationRows.Close()
-				return nil, err
-			}
-			locations = append(locations, location)
-		}
-		locationRows.Close()
-
-		if err = locationRows.Err(); err != nil {
-			return nil, err
-		}
-
 		service.Locations = locations
 		services = append(services, service)
 	}
@@ -368,4 +283,97 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 	}
 
 	return services, nil
+}
+
+func (s *APIServer) AddRealtimeData(ctx context.Context, service *ServiceResponse, date time.Time) {
+	if service == nil || service.TrainUid == "" {
+		return
+	}
+
+	runDate := utils.FormatRunDate(date)
+	trainUid := strings.TrimSpace(service.TrainUid)
+
+	journey, err := utils.LoadTrainJourney(ctx, s.DB, s.Redis, trainUid, runDate)
+	if err != nil {
+		log.Warnf("Failed to load journey for %s: %v", trainUid, err)
+		return
+	}
+
+	stanoxToStop := make(map[string]types.Stop)
+	for _, stop := range journey.Stops {
+		stanoxToStop[stop.Stanox] = stop
+	}
+
+	for i := range service.Locations {
+		location := &service.Locations[i]
+
+		stanox, err := utils.GetStanoxByTiplocCached(ctx, s.DB, s.Redis, location.TiplocCode, 24*time.Hour)
+		if err != nil {
+			continue
+		}
+
+		stop, found := stanoxToStop[stanox]
+		if !found {
+			continue
+		}
+
+		if stop.ActualArr != "" {
+			formattedTime := utils.FormatActualTime(stop.ActualArr)
+			service.Locations[i].ActualArrival = &formattedTime
+
+			if location.Arrival != nil && *location.Arrival != "" {
+				lateness := utils.CalculateLateness(*location.Arrival, stop.ActualArr)
+				service.Locations[i].ArrivalLateness = &lateness
+			}
+		}
+
+		if stop.ActualDep != "" {
+			formattedTime := utils.FormatActualTime(stop.ActualDep)
+			service.Locations[i].ActualDeparture = &formattedTime
+
+			if location.Departure != nil && *location.Departure != "" {
+				lateness := utils.CalculateLateness(*location.Departure, stop.ActualDep)
+				service.Locations[i].DepartureLateness = &lateness
+			}
+		}
+	}
+}
+
+func fetchStops(db *pgxpool.Pool, scheduleID int) ([]ScheduleLocation, error) {
+	rows, err := db.Query(context.Background(), `
+		SELECT id, location_type, tiploc_code,
+			   arrival::text, public_arrival::text,
+			   departure::text, public_departure::text,
+			   platform, location_order
+		FROM schedule_location 
+		WHERE schedule_id = $1 
+		ORDER BY location_order
+	`, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var locations []ScheduleLocation
+	for rows.Next() {
+		var location ScheduleLocation
+		if err := rows.Scan(
+			&location.Id,
+			&location.LocationType,
+			&location.TiplocCode,
+			&location.Arrival,
+			&location.PublicArrival,
+			&location.Departure,
+			&location.PublicDeparture,
+			&location.Platform,
+			&location.LocationOrder,
+		); err != nil {
+			return nil, err
+		}
+		locations = append(locations, location)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return locations, nil
 }
