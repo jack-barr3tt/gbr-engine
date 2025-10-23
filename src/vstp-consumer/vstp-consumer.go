@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -13,16 +12,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 func main() {
+	utils.InitLogger()
+	defer utils.SyncLogger()
+	log := utils.GetLogger()
+
 	ctx := context.Background()
 
-	log.Println("Starting VSTP consumer...")
+	log.Info("Starting VSTP consumer...")
 
 	db, err := utils.NewPostgresConnection()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalw("failed to connect to Postgres", "error", err)
 	}
 	defer db.Close()
 
@@ -31,40 +35,39 @@ func main() {
 
 	conn, channel, err := utils.NewRabbitConnection()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalw("failed to connect to RabbitMQ", "error", err)
 	}
 	defer conn.Close()
 	defer channel.Close()
 
 	_, err = channel.QueueDeclare("vstp", false, false, false, false, nil)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalw("failed to declare VSTP queue", "error", err)
 	}
 
 	msgs, err := channel.Consume("vstp", "", true, false, false, false, nil)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalw("failed to consume VSTP queue", "error", err)
 	}
 
-	fmt.Println("Processing VSTP schedule messages...")
+	log.Info("Processing VSTP schedule messages...")
 
 	for msg := range msgs {
 		var vstpMsg types.VSTPMessage
 		if err := json.Unmarshal(msg.Body, &vstpMsg); err != nil {
-			log.Printf("Bad JSON: %v", err)
+			log.Warnw("bad json in VSTP message", "error", err)
 			continue
 		}
 
-		if err := processVSTPMessage(ctx, db, rdb, &vstpMsg); err != nil {
-			log.Printf("Error processing VSTP message: %v", err)
+		if err := processVSTPMessage(ctx, db, rdb, log, &vstpMsg); err != nil {
+			log.Warnw("error processing VSTP message", "error", err)
 			continue
 		}
-
-		fmt.Printf("Processed VSTP schedule: %s\n", vstpMsg.VSTPCIFMsgV1.Schedule.TrainUID)
+		log.Infow("processed VSTP schedule", "train_uid", vstpMsg.VSTPCIFMsgV1.Schedule.TrainUID)
 	}
 }
 
-func processVSTPMessage(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, vstpMsg *types.VSTPMessage) error {
+func processVSTPMessage(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, logger *zap.SugaredLogger, vstpMsg *types.VSTPMessage) error {
 	schedule := &vstpMsg.VSTPCIFMsgV1.Schedule
 
 	startDate, err := time.Parse("2006-01-02", schedule.ScheduleStartDate)
@@ -177,9 +180,9 @@ func processVSTPMessage(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client
 	b, _ := json.Marshal(journey)
 	key := utils.BuildScheduleKey(trainUID, runDate)
 	if err := rdb.Set(ctx, key, b, 72*time.Hour).Err(); err != nil {
-		log.Printf("Failed to write schedule to Redis for %s: %v", schedule.TrainUID, err)
+		logger.Warnw("failed to write schedule to Redis", "train_uid", schedule.TrainUID, "error", err)
 	} else {
-		fmt.Printf("Wrote schedule to Redis: %s\n", key)
+		logger.Infow("wrote schedule to Redis", "key", key)
 	}
 
 	return nil

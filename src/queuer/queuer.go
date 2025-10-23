@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"sync"
@@ -21,7 +19,7 @@ var mqConn *amqp.Connection
 func HandleTrust(channel *amqp.Channel, data string) {
 	messages, err := utils.UnmarshalTrustMessages(data)
 	if err != nil {
-		log.Println("Error unmarshalling message:", err)
+		utils.GetLogger().Warnw("error unmarshalling TRUST message", "error", err)
 		return
 	}
 
@@ -38,9 +36,9 @@ func HandleTrust(channel *amqp.Channel, data string) {
 			},
 		)
 		if err != nil {
-			log.Println("Error publishing message to RabbitMQ:", err)
+			utils.GetLogger().Warnw("error publishing message to RabbitMQ", "queue", "trust", "error", err)
 		} else {
-			fmt.Println("Published message to RabbitMQ for TRUST")
+			utils.GetLogger().Debug("Published message to RabbitMQ for TRUST")
 		}
 	}
 }
@@ -48,7 +46,7 @@ func HandleTrust(channel *amqp.Channel, data string) {
 func HandleTD(channel *amqp.Channel, data string) {
 	tdcMessages, tdsMessages, err := utils.UnmarshalTDMessages(data)
 	if err != nil {
-		log.Println("Error unmarshalling message:", err)
+		utils.GetLogger().Warnw("error unmarshalling TD message", "error", err)
 		return
 	}
 
@@ -65,9 +63,9 @@ func HandleTD(channel *amqp.Channel, data string) {
 			},
 		)
 		if err != nil {
-			log.Println("Error publishing message to RabbitMQ:", err)
+			utils.GetLogger().Warnw("error publishing message to RabbitMQ", "queue", "tdc", "error", err)
 		} else {
-			fmt.Println("Published message to RabbitMQ for TD-C")
+			utils.GetLogger().Debug("Published message to RabbitMQ for TD-C")
 		}
 	}
 
@@ -84,9 +82,9 @@ func HandleTD(channel *amqp.Channel, data string) {
 			},
 		)
 		if err != nil {
-			log.Println("Error publishing message to RabbitMQ:", err)
+			utils.GetLogger().Warnw("error publishing message to RabbitMQ", "queue", "tds", "error", err)
 		} else {
-			fmt.Println("Published message to RabbitMQ for TD-S")
+			utils.GetLogger().Debug("Published message to RabbitMQ for TD-S")
 		}
 	}
 }
@@ -94,7 +92,7 @@ func HandleTD(channel *amqp.Channel, data string) {
 func HandleVSTP(channel *amqp.Channel, data string) {
 	message, err := utils.UnmarshalVSTP(data)
 	if err != nil {
-		log.Println("Error unmarshalling VSTP message:", err)
+		utils.GetLogger().Warnw("error unmarshalling VSTP message", "error", err)
 		return
 	}
 
@@ -110,20 +108,23 @@ func HandleVSTP(channel *amqp.Channel, data string) {
 		},
 	)
 	if err != nil {
-		log.Println("Error publishing message to RabbitMQ:", err)
+		utils.GetLogger().Warnw("error publishing message to RabbitMQ", "queue", "vstp", "error", err)
 	} else {
-		fmt.Println("Published message to RabbitMQ for VSTP")
+		utils.GetLogger().Debug("Published message to RabbitMQ for VSTP")
 	}
 }
 
 func main() {
+	utils.InitLogger()
+	defer utils.SyncLogger()
+	logger := utils.GetLogger()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	var err error
 	mqConn, err = utils.NewRabbitConnectionOnly()
 	if err != nil {
-		log.Fatal("Failed to connect to RabbitMQ:", err)
+		logger.Fatalw("failed to connect to RabbitMQ", "error", err)
 	}
 	defer mqConn.Close()
 
@@ -134,7 +135,7 @@ func main() {
 		select {
 		case err := <-closeChan:
 			if err != nil {
-				log.Printf("RabbitMQ connection closed: %v", err)
+				logger.Warnw("RabbitMQ connection closed", "error", err)
 			}
 		case <-ctx.Done():
 			return
@@ -144,25 +145,25 @@ func main() {
 	// Create separate channels for each listener to avoid concurrency issues
 	trustChannel, err := mqConn.Channel()
 	if err != nil {
-		log.Fatal("Failed to create trust channel:", err)
+		logger.Fatalw("failed to create TRUST channel", "error", err)
 	}
 	defer trustChannel.Close()
 
 	tdChannel, err := mqConn.Channel()
 	if err != nil {
-		log.Fatal("Failed to create td channel:", err)
+		logger.Fatalw("failed to create TD channel", "error", err)
 	}
 	defer tdChannel.Close()
 
 	vstpChannel, err := mqConn.Channel()
 	if err != nil {
-		log.Fatal("Failed to create vstp channel:", err)
+		logger.Fatalw("failed to create VSTP channel", "error", err)
 	}
 	defer vstpChannel.Close()
 
 	stompConn, err := utils.NewNRStompConnection()
 	if err != nil {
-		log.Fatal("Failed to connect to NR Stomp:", err)
+		logger.Fatalw("failed to connect to NR stomp", "error", err)
 	}
 
 	var wg sync.WaitGroup

@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -78,34 +76,38 @@ func UpdateTOCs(pg *pgxpool.Pool) error {
 }
 
 func main() {
+	utils.InitLogger()
+	defer utils.SyncLogger()
+	log := utils.GetLogger()
+
 	pg, err := utils.NewPostgresConnection()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalw("failed to connect to Postgres", "error", err)
 	}
 
 	for {
 		rows, err := pg.Query(context.Background(), "SELECT key FROM reference_fetch WHERE last_fetched + max_age < NOW()")
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalw("failed to query reference_fetch", "error", err)
 		}
 
 		var key string
 		for rows.Next() {
 			if err := rows.Scan(&key); err != nil {
-				log.Fatal(err)
+				log.Fatalw("failed to scan key", "error", err)
 			}
 
 			switch key {
 			case "toc":
-				log.Println("Updating TOC reference data...")
+				log.Info("Updating TOC reference data...")
 				err := UpdateTOCs(pg)
 				if err != nil {
-					log.Printf("Error updating TOC reference data: %v\n", err)
+					log.Warnw("Error updating TOC reference data", "error", err)
 				} else {
-					log.Println("TOC reference data updated successfully.")
+					log.Info("TOC reference data updated successfully.")
 				}
 			default:
-				fmt.Printf("Unknown key: %s\n", key)
+				log.Infow("unknown reference key", "key", key)
 			}
 		}
 

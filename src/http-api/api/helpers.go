@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2/log"
 	"github.com/jack-barr3tt/gbr-engine/src/common/types"
 	"github.com/jack-barr3tt/gbr-engine/src/common/utils"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,7 +25,7 @@ func (s *APIServer) GetServicesByHeadcode(headcode string) ([]ServiceResponse, e
 	`, headcode)
 
 	if err != nil {
-		log.Error(err)
+		s.Logger.Errorw("failed to query services by headcode", "error", err, "headcode", headcode)
 		return nil, err
 	}
 	defer scheduleRows.Close()
@@ -295,7 +294,7 @@ func (s *APIServer) AddRealtimeData(ctx context.Context, service *ServiceRespons
 
 	journey, err := utils.LoadTrainJourney(ctx, s.DB, s.Redis, trainUid, runDate)
 	if err != nil {
-		log.Warnf("Failed to load journey for %s: %v", trainUid, err)
+		s.Logger.Debugw("no realtime data for train", "train_uid", trainUid, "error", err)
 		return
 	}
 

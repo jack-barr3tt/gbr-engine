@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -57,11 +56,14 @@ func parseTime(timeStr string) (*time.Time, error) {
 }
 
 func main() {
-	log.Println("Starting schedule initialization...")
+	utils.InitLogger()
+	defer utils.SyncLogger()
+	l := utils.GetLogger()
+	l.Info("Starting schedule initialization...")
 
 	pg, err := utils.NewPostgresConnection()
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		l.Fatalw("Failed to connect to database", "error", err)
 	}
 	defer pg.Close()
 
@@ -71,34 +73,34 @@ func main() {
 	password := os.Getenv("NR_FEEDS_PASSWORD")
 
 	if username == "" || password == "" {
-		log.Fatal("NR_FEEDS_USERNAME and NR_FEEDS_PASSWORD environment variables must be set")
+		l.Fatal("NR_FEEDS_USERNAME and NR_FEEDS_PASSWORD environment variables must be set")
 	}
 
-	log.Println("Downloading schedule data...")
+	l.Info("Downloading schedule data...")
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		log.Fatal("Failed to create request:", err)
+		l.Fatalw("Failed to create request", "error", err)
 	}
 	req.SetBasicAuth(username, password)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatal("Failed to download schedule data:", err)
+		l.Fatalw("Failed to download schedule data", "error", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		log.Fatalf("HTTP error: %d %s", resp.StatusCode, resp.Status)
+		l.Fatalf("HTTP error: %d %s", resp.StatusCode, resp.Status)
 	}
 
 	gzReader, err := gzip.NewReader(resp.Body)
 	if err != nil {
-		log.Fatal("Failed to create gzip reader:", err)
+		l.Fatalw("Failed to create gzip reader", "error", err)
 	}
 	defer gzReader.Close()
 
-	log.Println("Processing schedule data...")
+	l.Info("Processing schedule data...")
 
 	var processedCount int
 	var tiplocCount int
@@ -110,13 +112,13 @@ func main() {
 		line := scanner.Text()
 		var entry types.TimetableEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			log.Println("Error unmarshalling JSON:", err)
+			l.Warnw("Error unmarshalling JSON", "error", err)
 			continue
 		}
 
 		processedCount++
 		if processedCount%10000 == 0 {
-			log.Printf("Processed %d entries (TIPLOCs: %d, Associations: %d, Schedules: %d)",
+			l.Infof("Processed %d entries (TIPLOCs: %d, Associations: %d, Schedules: %d)",
 				processedCount, tiplocCount, associationCount, scheduleCount)
 		}
 
@@ -141,7 +143,7 @@ func main() {
 				entry.TiplocV1.TpsDescription,
 			)
 			if err != nil {
-				log.Printf("Error inserting Tiploc %s: %v", entry.TiplocV1.TiplocCode, err)
+				l.Warnw("Error inserting Tiploc", "tiploc", entry.TiplocV1.TiplocCode, "error", err)
 			} else {
 				tiplocCount++
 			}
@@ -151,13 +153,13 @@ func main() {
 
 			startDate, err := parseDate(assoc.AssocStartDate)
 			if err != nil {
-				log.Printf("Error parsing association start date %s: %v", assoc.AssocStartDate, err)
+				l.Warnw("Error parsing association start date", "assoc_start_date", assoc.AssocStartDate, "error", err)
 				continue
 			}
 
 			endDate, err := parseDate(assoc.AssocEndDate)
 			if err != nil {
-				log.Printf("Error parsing association end date %s: %v", assoc.AssocEndDate, err)
+				l.Warnw("Error parsing association end date", "assoc_end_date", assoc.AssocEndDate, "error", err)
 				continue
 			}
 
@@ -194,7 +196,7 @@ func main() {
 			)
 
 			if err != nil {
-				log.Printf("Error inserting association %s-%s: %v", assoc.MainTrainUID, assoc.AssocTrainUID, err)
+				l.Warnw("Error inserting association", "main_train_uid", assoc.MainTrainUID, "assoc_train_uid", assoc.AssocTrainUID, "error", err)
 			} else {
 				associationCount++
 			}
@@ -202,7 +204,7 @@ func main() {
 		case entry.JsonScheduleV1 != nil:
 			tx, err := pg.Begin(context.Background())
 			if err != nil {
-				log.Printf("Error starting transaction for schedule %s: %v", entry.JsonScheduleV1.TrainUID, err)
+				l.Warnw("Error starting transaction for schedule", "train_uid", entry.JsonScheduleV1.TrainUID, "error", err)
 				continue
 			}
 
@@ -210,14 +212,14 @@ func main() {
 
 			startDate, err := parseDate(schedule.ScheduleStartDate)
 			if err != nil {
-				log.Printf("Error parsing schedule start date %s: %v", schedule.ScheduleStartDate, err)
+				l.Warnw("Error parsing schedule start date", "schedule_start_date", schedule.ScheduleStartDate, "error", err)
 				tx.Rollback(context.Background())
 				continue
 			}
 
 			endDate, err := parseDate(schedule.ScheduleEndDate)
 			if err != nil {
-				log.Printf("Error parsing schedule end date %s: %v", schedule.ScheduleEndDate, err)
+				l.Warnw("Error parsing schedule end date", "schedule_end_date", schedule.ScheduleEndDate, "error", err)
 				tx.Rollback(context.Background())
 				continue
 			}
@@ -275,7 +277,7 @@ func main() {
 			).Scan(&scheduleID)
 
 			if err != nil {
-				log.Printf("Error inserting schedule %s: %v", schedule.TrainUID, err)
+				l.Warnw("Error inserting schedule", "train_uid", schedule.TrainUID, "error", err)
 				tx.Rollback(context.Background())
 				continue
 			}
@@ -288,7 +290,7 @@ func main() {
 					return ""
 				}())
 				if err != nil {
-					log.Printf("Error parsing arrival time for schedule %s location %d: %v", schedule.TrainUID, i, err)
+					l.Warnw("Error parsing arrival time", "train_uid", schedule.TrainUID, "location_index", i, "error", err)
 					continue
 				}
 
@@ -299,7 +301,7 @@ func main() {
 					return ""
 				}())
 				if err != nil {
-					log.Printf("Error parsing public arrival time for schedule %s location %d: %v", schedule.TrainUID, i, err)
+					l.Warnw("Error parsing public arrival time", "train_uid", schedule.TrainUID, "location_index", i, "error", err)
 					continue
 				}
 
@@ -310,7 +312,7 @@ func main() {
 					return ""
 				}())
 				if err != nil {
-					log.Printf("Error parsing departure time for schedule %s location %d: %v", schedule.TrainUID, i, err)
+					l.Warnw("Error parsing departure time", "train_uid", schedule.TrainUID, "location_index", i, "error", err)
 					continue
 				}
 
@@ -321,7 +323,7 @@ func main() {
 					return ""
 				}())
 				if err != nil {
-					log.Printf("Error parsing public departure time for schedule %s location %d: %v", schedule.TrainUID, i, err)
+					l.Warnw("Error parsing public departure time", "train_uid", schedule.TrainUID, "location_index", i, "error", err)
 					continue
 				}
 
@@ -332,7 +334,7 @@ func main() {
 					return ""
 				}())
 				if err != nil {
-					log.Printf("Error parsing pass time for schedule %s location %d: %v", schedule.TrainUID, i, err)
+					l.Warnw("Error parsing pass time", "train_uid", schedule.TrainUID, "location_index", i, "error", err)
 					continue
 				}
 
@@ -364,19 +366,19 @@ func main() {
 				)
 
 				if err != nil {
-					log.Printf("Error inserting schedule location %d for schedule %s: %v", i, schedule.TrainUID, err)
+					l.Warnw("Error inserting schedule location", "location_index", i, "train_uid", schedule.TrainUID, "error", err)
 					break
 				}
 			}
 
 			if err := tx.Commit(context.Background()); err != nil {
-				log.Printf("Error committing schedule transaction for %s: %v", schedule.TrainUID, err)
+				l.Warnw("Error committing schedule transaction", "train_uid", schedule.TrainUID, "error", err)
 			} else {
 				scheduleCount++
 			}
 
 		case entry.EOF != nil && entry.EOF.EOF:
-			log.Println("End of schedule data reached.")
+			l.Info("End of schedule data reached.")
 			goto endProcessing
 
 		default:
@@ -386,10 +388,10 @@ func main() {
 
 endProcessing:
 	if err := scanner.Err(); err != nil {
-		log.Fatal("Error reading schedule file:", err)
+		l.Fatalw("Error reading schedule file", "error", err)
 	}
 
-	log.Printf("Schedule initialization completed successfully!")
-	log.Printf("Final counts - TIPLOCs: %d, Associations: %d, Schedules: %d",
+	l.Info("Schedule initialization completed successfully!")
+	l.Infof("Final counts - TIPLOCs: %d, Associations: %d, Schedules: %d",
 		tiplocCount, associationCount, scheduleCount)
 }
