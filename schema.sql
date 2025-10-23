@@ -98,3 +98,14 @@ CREATE TABLE IF NOT EXISTS reference_fetch (
 );
 INSERT INTO reference_fetch (key, last_fetched, max_age)
 VALUES ('toc', '2000-01-01 00:00:00', '1 week');
+CREATE INDEX IF NOT EXISTS idx_tiploc_stanox ON tiploc(stanox)
+WHERE stanox IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tiploc_crs_code ON tiploc(crs_code)
+WHERE crs_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_schedule_train_uid_dates ON schedule(
+  train_uid,
+  schedule_start_date,
+  schedule_end_date
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_dates ON schedule(schedule_start_date, schedule_end_date);
+CREATE INDEX IF NOT EXISTS idx_schedule_location_schedule_order ON schedule_location(schedule_id, location_order);

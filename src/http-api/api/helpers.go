@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jack-barr3tt/gbr-engine/src/common/types"
@@ -236,6 +237,7 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 	defer scheduleRows.Close()
 
 	services := make([]ServiceResponse, 0)
+	scheduleIDs := make([]int, 0)
 
 	for scheduleRows.Next() {
 		var service ServiceResponse
@@ -269,11 +271,7 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 		service.ScheduleEndDate = &endDate
 		service.ScheduleDaysRuns = &scheduleDaysRuns
 
-		locations, err := fetchStops(db, service.Id)
-		if err != nil {
-			return nil, err
-		}
-		service.Locations = locations
+		scheduleIDs = append(scheduleIDs, service.Id)
 		services = append(services, service)
 	}
 
@@ -281,61 +279,181 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 		return nil, err
 	}
 
+	if len(scheduleIDs) > 0 {
+		allStops, err := fetchStopsBatch(db, scheduleIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		// Assign stops to each service
+		for i := range services {
+			services[i].Locations = allStops[services[i].Id]
+		}
+	}
+
 	return services, nil
 }
 
-func (s *APIServer) AddRealtimeData(ctx context.Context, service *ServiceResponse, date time.Time) {
-	if service == nil || service.TrainUid == "" {
+
+func (s *APIServer) AddRealtimeData(ctx context.Context, services []ServiceResponse, date time.Time) {
+	if len(services) == 0 {
 		return
 	}
 
 	runDate := utils.FormatRunDate(date)
-	trainUid := strings.TrimSpace(service.TrainUid)
 
-	journey, err := utils.LoadTrainJourney(ctx, s.DB, s.Redis, trainUid, runDate)
+	trainUIDs := make(map[string]bool)
+	for i := range services {
+		if services[i].TrainUid != "" {
+			trainUIDs[strings.TrimSpace(services[i].TrainUid)] = true
+		}
+	}
+
+	journeys := make(map[string]types.TrainJourney)
+	journeyMutex := &sync.Mutex{}
+	journeyWg := &sync.WaitGroup{}
+	semaphore := make(chan struct{}, 50)
+
+	for trainUID := range trainUIDs {
+		journeyWg.Add(1)
+		go func(uid string) {
+			defer journeyWg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			journey, err := utils.LoadTrainJourney(ctx, s.DB, s.Redis, uid, runDate)
+			if err == nil {
+				journeyMutex.Lock()
+				journeys[uid] = journey
+				journeyMutex.Unlock()
+			}
+		}(trainUID)
+	}
+	journeyWg.Wait()
+
+	tiplocs := make(map[string]bool)
+	for i := range services {
+		for j := range services[i].Locations {
+			tiplocs[services[i].Locations[j].TiplocCode] = true
+		}
+	}
+
+	tiplocToStanox := make(map[string]string)
+	stanoxMutex := &sync.Mutex{}
+	stanoxWg := &sync.WaitGroup{}
+
+	stanoxSemaphore := make(chan struct{}, 100)
+
+	for tiploc := range tiplocs {
+		stanoxWg.Add(1)
+		go func(t string) {
+			defer stanoxWg.Done()
+			stanoxSemaphore <- struct{}{}
+			defer func() { <-stanoxSemaphore }()
+
+			stanox, err := utils.GetStanoxByTiplocCached(ctx, s.DB, s.Redis, t, 24*time.Hour)
+			if err == nil {
+				stanoxMutex.Lock()
+				tiplocToStanox[t] = stanox
+				stanoxMutex.Unlock()
+			}
+		}(tiploc)
+	}
+	stanoxWg.Wait()
+
+	for i := range services {
+		trainUid := strings.TrimSpace(services[i].TrainUid)
+		journey, hasJourney := journeys[trainUid]
+		if !hasJourney {
+			continue
+		}
+
+		stanoxToStop := make(map[string]types.Stop)
+		for _, stop := range journey.Stops {
+			stanoxToStop[stop.Stanox] = stop
+		}
+
+		for j := range services[i].Locations {
+			location := &services[i].Locations[j]
+
+			stanox, hasStanox := tiplocToStanox[location.TiplocCode]
+			if !hasStanox {
+				continue
+			}
+
+			stop, found := stanoxToStop[stanox]
+			if !found {
+				continue
+			}
+
+			if stop.ActualArr != "" {
+				formattedTime := utils.FormatActualTime(stop.ActualArr)
+				services[i].Locations[j].ActualArrival = &formattedTime
+
+				if location.Arrival != nil && *location.Arrival != "" {
+					lateness := utils.CalculateLateness(*location.Arrival, stop.ActualArr)
+					services[i].Locations[j].ArrivalLateness = &lateness
+				}
+			}
+
+			if stop.ActualDep != "" {
+				formattedTime := utils.FormatActualTime(stop.ActualDep)
+				services[i].Locations[j].ActualDeparture = &formattedTime
+
+				if location.Departure != nil && *location.Departure != "" {
+					lateness := utils.CalculateLateness(*location.Departure, stop.ActualDep)
+					services[i].Locations[j].DepartureLateness = &lateness
+				}
+			}
+		}
+	}
+}
+
+func fetchStopsBatch(db *pgxpool.Pool, scheduleIDs []int) (map[int][]ScheduleLocation, error) {
+	if len(scheduleIDs) == 0 {
+		return make(map[int][]ScheduleLocation), nil
+	}
+
+	rows, err := db.Query(context.Background(), `
+		SELECT schedule_id, id, location_type, tiploc_code,
+			   arrival::text, public_arrival::text,
+			   departure::text, public_departure::text,
+			   platform, location_order
+		FROM schedule_location 
+		WHERE schedule_id = ANY($1)
+		ORDER BY schedule_id, location_order
+	`, scheduleIDs)
 	if err != nil {
-		s.Logger.Debugw("no realtime data for train", "train_uid", trainUid, "error", err)
-		return
+		return nil, err
+	}
+	defer rows.Close()
+
+	locationsBySchedule := make(map[int][]ScheduleLocation)
+	for rows.Next() {
+		var scheduleID int
+		var location ScheduleLocation
+		if err := rows.Scan(
+			&scheduleID,
+			&location.Id,
+			&location.LocationType,
+			&location.TiplocCode,
+			&location.Arrival,
+			&location.PublicArrival,
+			&location.Departure,
+			&location.PublicDeparture,
+			&location.Platform,
+			&location.LocationOrder,
+		); err != nil {
+			return nil, err
+		}
+		locationsBySchedule[scheduleID] = append(locationsBySchedule[scheduleID], location)
 	}
 
-	stanoxToStop := make(map[string]types.Stop)
-	for _, stop := range journey.Stops {
-		stanoxToStop[stop.Stanox] = stop
+	if err = rows.Err(); err != nil {
+		return nil, err
 	}
 
-	for i := range service.Locations {
-		location := &service.Locations[i]
-
-		stanox, err := utils.GetStanoxByTiplocCached(ctx, s.DB, s.Redis, location.TiplocCode, 24*time.Hour)
-		if err != nil {
-			continue
-		}
-
-		stop, found := stanoxToStop[stanox]
-		if !found {
-			continue
-		}
-
-		if stop.ActualArr != "" {
-			formattedTime := utils.FormatActualTime(stop.ActualArr)
-			service.Locations[i].ActualArrival = &formattedTime
-
-			if location.Arrival != nil && *location.Arrival != "" {
-				lateness := utils.CalculateLateness(*location.Arrival, stop.ActualArr)
-				service.Locations[i].ArrivalLateness = &lateness
-			}
-		}
-
-		if stop.ActualDep != "" {
-			formattedTime := utils.FormatActualTime(stop.ActualDep)
-			service.Locations[i].ActualDeparture = &formattedTime
-
-			if location.Departure != nil && *location.Departure != "" {
-				lateness := utils.CalculateLateness(*location.Departure, stop.ActualDep)
-				service.Locations[i].DepartureLateness = &lateness
-			}
-		}
-	}
+	return locationsBySchedule, nil
 }
 
 func fetchStops(db *pgxpool.Pool, scheduleID int) ([]ScheduleLocation, error) {
