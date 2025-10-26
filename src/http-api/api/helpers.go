@@ -17,12 +17,13 @@ func (s *APIServer) GetServicesByHeadcode(headcode string) ([]ServiceResponse, e
 	var services []ServiceResponse
 
 	scheduleRows, err := s.DB.Query(context.Background(), `
-		SELECT id, train_uid, signalling_id, headcode, train_category, 
-		       schedule_start_date, schedule_end_date, schedule_days_runs, 
-		       train_status, atoc_code
-		FROM schedule 
-		WHERE signalling_id = $1 
-		ORDER BY id
+		SELECT s.id, s.train_uid, s.signalling_id, s.headcode, s.train_category, 
+		       s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs, 
+		       s.train_status, s.atoc_code, t.name
+		FROM schedule s
+		LEFT JOIN reference_toc t ON s.atoc_code = t.code
+		WHERE s.signalling_id = $1 
+		ORDER BY s.id
 	`, headcode)
 
 	if err != nil {
@@ -34,6 +35,8 @@ func (s *APIServer) GetServicesByHeadcode(headcode string) ([]ServiceResponse, e
 	for scheduleRows.Next() {
 		var service ServiceResponse
 		var scheduleStartDate, scheduleEndDate time.Time
+		var atocCode sql.NullString
+		var tocName sql.NullString
 
 		err := scheduleRows.Scan(
 			&service.Id,
@@ -45,7 +48,8 @@ func (s *APIServer) GetServicesByHeadcode(headcode string) ([]ServiceResponse, e
 			&scheduleEndDate,
 			&service.ScheduleDaysRuns,
 			&service.TrainStatus,
-			&service.AtocCode,
+			&atocCode,
+			&tocName,
 		)
 
 		if err != nil {
@@ -56,6 +60,14 @@ func (s *APIServer) GetServicesByHeadcode(headcode string) ([]ServiceResponse, e
 		endDate := openapi_types.Date{Time: scheduleEndDate}
 		service.ScheduleStartDate = &startDate
 		service.ScheduleEndDate = &endDate
+
+		// Populate operator if available
+		if atocCode.Valid && tocName.Valid {
+			service.Operator = &Operator{
+				Code: atocCode.String,
+				Name: tocName.String,
+			}
+		}
 
 		locationMap, err := fetchStops(s.DB, service.Id)
 		if err != nil {
@@ -223,10 +235,11 @@ func (s *APIServer) GetLocationDetails(stanox string) (string, string, []string,
 func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.Time) ([]ServiceResponse, error) {
 	query := `
 		SELECT DISTINCT s.id, s.train_uid, s.signalling_id, s.headcode, s.train_category, 
-			   s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs, s.train_status, s.atoc_code
+			   s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs, s.train_status, s.atoc_code, rt.name
 		FROM schedule s
 		JOIN schedule_location sl ON s.id = sl.schedule_id
 		JOIN tiploc t ON sl.tiploc_code = t.tiploc_code
+		LEFT JOIN reference_toc rt ON s.atoc_code = rt.code
 		WHERE t.stanox = $1
 	`
 
@@ -243,6 +256,8 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 		var service ServiceResponse
 		var scheduleStartDate, scheduleEndDate time.Time
 		var scheduleDaysRuns string
+		var atocCode sql.NullString
+		var tocName sql.NullString
 
 		err := scheduleRows.Scan(
 			&service.Id,
@@ -254,7 +269,8 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 			&scheduleEndDate,
 			&scheduleDaysRuns,
 			&service.TrainStatus,
-			&service.AtocCode,
+			&atocCode,
+			&tocName,
 		)
 
 		if err != nil {
@@ -270,6 +286,14 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 		service.ScheduleStartDate = &startDate
 		service.ScheduleEndDate = &endDate
 		service.ScheduleDaysRuns = &scheduleDaysRuns
+
+		// Populate operator if available
+		if atocCode.Valid && tocName.Valid {
+			service.Operator = &Operator{
+				Code: atocCode.String,
+				Name: tocName.String,
+			}
+		}
 
 		scheduleIDs = append(scheduleIDs, service.Id)
 		services = append(services, service)

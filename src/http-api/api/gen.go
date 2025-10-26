@@ -51,6 +51,12 @@ type NotFoundResponse struct {
 	Error string `json:"error"`
 }
 
+// Operator defines model for Operator.
+type Operator struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+}
+
 // ScheduleLocation defines model for ScheduleLocation.
 type ScheduleLocation struct {
 	// ActualArrival Actual arrival time from TRUST feed (if available)
@@ -77,10 +83,10 @@ type ScheduleLocation struct {
 
 // ServiceResponse defines model for ServiceResponse.
 type ServiceResponse struct {
-	AtocCode          *string             `json:"atoc_code,omitempty"`
 	Headcode          string              `json:"headcode"`
 	Id                int                 `json:"id"`
 	Locations         []ScheduleLocation  `json:"locations"`
+	Operator          *Operator           `json:"operator,omitempty"`
 	ScheduleDaysRuns  *string             `json:"schedule_days_runs,omitempty"`
 	ScheduleEndDate   *openapi_types.Date `json:"schedule_end_date,omitempty"`
 	ScheduleStartDate *openapi_types.Date `json:"schedule_start_date,omitempty"`

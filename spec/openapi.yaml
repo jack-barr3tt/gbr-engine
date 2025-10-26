@@ -174,9 +174,8 @@ components:
         train_status:
           type: string
           example: "P"
-        atoc_code:
-          type: string
-          example: "LE"
+        operator:
+          $ref: "#/components/schemas/Operator"
         locations:
           type: array
           items:
@@ -187,6 +186,18 @@ components:
         - signalling_id
         - headcode
         - locations
+    Operator:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "LE"
+        name:
+          type: string
+          example: "Greater Anglia"
+      required:
+        - code
+        - name
     Location:
       type: object
       properties:
