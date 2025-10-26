@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jack-barr3tt/gbr-engine/src/common/data"
 	"github.com/jack-barr3tt/gbr-engine/src/common/types"
 	"github.com/jack-barr3tt/gbr-engine/src/common/utils"
 	"github.com/jackc/pgx/v5"
@@ -14,6 +15,13 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
+
+type Connections struct {
+	DB     *pgxpool.Pool
+	Redis  *redis.Client
+	Logger *zap.SugaredLogger
+	Data   *data.DataClient
+}
 
 func main() {
 	utils.InitLogger()
@@ -59,7 +67,12 @@ func main() {
 			continue
 		}
 
-		if err := processVSTPMessage(ctx, db, rdb, log, &vstpMsg); err != nil {
+		if err := processVSTPMessage(ctx, &Connections{
+			DB:     db,
+			Redis:  rdb,
+			Logger: log,
+			Data:   data.NewDataClient(db, rdb, log),
+		}, &vstpMsg); err != nil {
 			log.Warnw("error processing VSTP message", "error", err)
 			continue
 		}
@@ -67,7 +80,7 @@ func main() {
 	}
 }
 
-func processVSTPMessage(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, logger *zap.SugaredLogger, vstpMsg *types.VSTPMessage) error {
+func processVSTPMessage(ctx context.Context, conn *Connections, vstpMsg *types.VSTPMessage) error {
 	schedule := &vstpMsg.VSTPCIFMsgV1.Schedule
 
 	startDate, err := time.Parse("2006-01-02", schedule.ScheduleStartDate)
@@ -80,7 +93,7 @@ func processVSTPMessage(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client
 		return fmt.Errorf("invalid end date: %v", err)
 	}
 
-	tx, err := db.Begin(ctx)
+	tx, err := conn.DB.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -158,16 +171,10 @@ func processVSTPMessage(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client
 	var stops []types.Stop
 	for _, segment := range schedule.ScheduleSegment {
 		for _, loc := range segment.ScheduleLocation {
-			var stanox string
-			tiplocID := loc.Location.Tiploc.TiplocId
-			tiplocKey := utils.BuildTiplocKey(tiplocID)
-			err := rdb.Get(ctx, tiplocKey).Scan(&stanox)
+			stanox, err := conn.Data.GetStanoxByTiploc(loc.Location.Tiploc.TiplocId)
+
 			if err != nil {
-				dbErr := db.QueryRow(ctx, `SELECT stanox FROM tiploc WHERE tiploc_code = $1`, tiplocID).Scan(&stanox)
-				if dbErr != nil || stanox == "" {
-					continue
-				}
-				rdb.Set(ctx, tiplocKey, stanox, 7*24*time.Hour)
+				continue
 			}
 
 			plannedArr := utils.FormatPlannedTime(loc.ScheduledArrivalTime)
@@ -179,10 +186,10 @@ func processVSTPMessage(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client
 	journey := types.TrainJourney{UID: trainUID, RunDate: runDate, Stops: stops}
 	b, _ := json.Marshal(journey)
 	key := utils.BuildScheduleKey(trainUID, runDate)
-	if err := rdb.Set(ctx, key, b, 72*time.Hour).Err(); err != nil {
-		logger.Warnw("failed to write schedule to Redis", "train_uid", schedule.TrainUID, "error", err)
+	if err := conn.Redis.Set(ctx, key, b, 72*time.Hour).Err(); err != nil {
+		conn.Logger.Warnw("failed to write schedule to Redis", "train_uid", schedule.TrainUID, "error", err)
 	} else {
-		logger.Infow("wrote schedule to Redis", "key", key)
+		conn.Logger.Infow("wrote schedule to Redis", "key", key)
 	}
 
 	return nil

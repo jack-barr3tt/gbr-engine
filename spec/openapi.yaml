@@ -201,9 +201,11 @@ components:
     Location:
       type: object
       properties:
-        tiploc:
-          type: string
-          example: "STANAIR"
+        tiploc_codes:
+          type: array
+          items:
+            type: string
+          example: ["STANAIR", "STANSTN"]
         stanox:
           type: string
           example: "87544"
@@ -214,7 +216,8 @@ components:
           type: string
           example: "Stansted Airport"
       required:
-        - tiploc
+        - tiploc_codes
+        - stanox
     ScheduleLocation:
       type: object
       properties:
@@ -273,32 +276,7 @@ components:
       type: object
       properties:
         location:
-          type: object
-          properties:
-            search_term:
-              type: string
-              example: "London Paddington"
-            search_type:
-              type: string
-              example: "name"
-            name:
-              type: string
-              example: "London Paddington"
-            stanox:
-              type: string
-              example: "87544"
-            crs_code:
-              type: string
-              example: "PAD"
-            tiploc_codes:
-              type: array
-              items:
-                type: string
-              example: ["PADTON", "PADTNJN"]
-          required:
-            - search_term
-            - search_type
-            - stanox
+          $ref: "#/components/schemas/Location"
         services:
           type: array
           items:

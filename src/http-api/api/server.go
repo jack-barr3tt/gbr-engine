@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/jack-barr3tt/gbr-engine/src/common/data"
 	"github.com/jack-barr3tt/gbr-engine/src/common/utils"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -11,6 +12,7 @@ type APIServer struct {
 	DB     *pgxpool.Pool
 	Redis  *redis.Client
 	Logger *zap.SugaredLogger
+	Data   *data.DataClient
 }
 
 func NewServer() (*APIServer, error) {
@@ -23,9 +25,12 @@ func NewServer() (*APIServer, error) {
 
 	redis := utils.NewRedisClient()
 
+	data := data.NewDataClient(db, redis, logger)
+
 	return &APIServer{
 		DB:     db,
 		Redis:  redis,
 		Logger: logger,
+		Data:   data,
 	}, nil
 }

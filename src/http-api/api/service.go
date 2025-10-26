@@ -1,11 +1,11 @@
 package api
 
 import (
-	"database/sql"
 	"net/http"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/jack-barr3tt/gbr-engine/src/common/data"
 )
 
 func (s *APIServer) GetService(c *fiber.Ctx, params GetServiceParams) error {
@@ -17,7 +17,11 @@ func (s *APIServer) GetService(c *fiber.Ctx, params GetServiceParams) error {
 		})
 	}
 
-	services, err := s.GetServicesByHeadcode(headcode)
+	filters := data.ServiceFilters{
+		Headcode: &headcode,
+	}
+
+	services, err := s.Data.GetServicesWithFilters(filters)
 	if err != nil {
 		errStr := err.Error()
 		return c.Status(http.StatusInternalServerError).JSON(ErrorResponse{
@@ -34,136 +38,71 @@ func (s *APIServer) GetService(c *fiber.Ctx, params GetServiceParams) error {
 		})
 	}
 
-	ctx := c.Context()
-	s.AddRealtimeData(ctx, services, time.Now())
+	s.Data.AddRealtimeData(services, time.Now())
 
 	return c.JSON(services)
 }
 
 func (s *APIServer) GetServicesAtLocation(c *fiber.Ctx, params GetServicesAtLocationParams) error {
-	paramCount := 0
-	var location string
-	var locationType string
+	// Resolve location to stanox
+	var stanox string
+	var err error
 
 	if params.Name != nil {
-		paramCount++
-		location = *params.Name
-		locationType = "name"
+		stanox, err = s.Data.GetStanoxByLocationName(*params.Name)
 	}
 	if params.Crs != nil {
-		paramCount++
-		location = *params.Crs
-		locationType = "crs"
+		stanox, err = s.Data.GetStanoxByCRS(*params.Crs)
 	}
 	if params.Tiploc != nil {
-		paramCount++
-		location = *params.Tiploc
-		locationType = "tiploc"
+		stanox, err = s.Data.GetStanoxByTiploc(*params.Tiploc)
 	}
 	if params.Stanox != nil {
-		paramCount++
-		location = *params.Stanox
-		locationType = "stanox"
+		stanox = *params.Stanox
+	}
+	if err != nil {
+		return HandleError(c, err)
 	}
 
-	if paramCount == 0 {
-		return c.Status(http.StatusBadRequest).JSON(ErrorResponse{
-			Error:   "Bad Request",
-			Message: "Must specify exactly one location parameter: name, crs, tiploc, or stanox",
-		})
-	}
-	if paramCount > 1 {
-		return c.Status(http.StatusBadRequest).JSON(ErrorResponse{
-			Error:   "Bad Request",
-			Message: "Must specify exactly one location parameter, not multiple",
-		})
-	}
-
+	// Determine check date
 	var checkDate time.Time
 	if params.Date != nil {
 		checkDate = params.Date.Time
 	} else {
-		checkDate = time.Now().UTC().Truncate(24 * time.Hour) // Start of today
+		checkDate = time.Now().UTC().Truncate(24 * time.Hour)
 	}
 
-	var stanox string
-	var err error
-
-	switch locationType {
-	case "name":
-		stanox, err = s.GetStanoxByLocationName(location)
-	case "crs":
-		stanox, err = GetStanoxByCRS(s.DB, location)
-	case "tiploc":
-		stanox, err = GetStanoxByTiploc(s.DB, location)
-	case "stanox":
-		stanox = location
-	default:
-		return c.Status(http.StatusBadRequest).JSON(ErrorResponse{
-			Error:   "Bad Request",
-			Message: "Invalid location type",
-		})
-	}
-
+	// Get location details
+	locationDetails, err := s.Data.GetLocationDetails(stanox)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return c.Status(http.StatusNotFound).JSON(NotFoundResponse{
-				Error: "Location not found",
-			})
-		}
-		errStr := err.Error()
-		return c.Status(http.StatusInternalServerError).JSON(ErrorResponse{
-			Error:   "Database error",
-			Message: "Failed to lookup location",
-			Stack:   &errStr,
-		})
+		return HandleError(c, err)
 	}
 
-	locationName, crsCode, tiplocCodes, err := s.GetLocationDetails(stanox)
+	// Create time range for the entire day
+	dayStart := checkDate.Truncate(24 * time.Hour)
+	dayEnd := dayStart.Add(24*time.Hour - time.Second)
+
+	// Get services with filters (includes day-of-week filtering)
+	services, err := s.Data.GetServicesWithFilters(data.ServiceFilters{
+		PassesThrough: []data.LocationFilter{{
+			Stanox:   stanox,
+			TimeFrom: &dayStart,
+			TimeTo:   &dayEnd,
+		}},
+	})
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return c.Status(http.StatusNotFound).JSON(NotFoundResponse{
-				Error: "Location details not found",
-			})
-		}
-		errStr := err.Error()
-		return c.Status(http.StatusInternalServerError).JSON(ErrorResponse{
-			Error:   "Database error",
-			Message: "Failed to retrieve location details",
-			Stack:   &errStr,
-		})
+		return HandleError(c, err)
 	}
 
-	services, err := GetScheduledServicesAtLocation(s.DB, stanox, checkDate)
-	if err != nil {
-		errStr := err.Error()
-		return c.Status(http.StatusInternalServerError).JSON(ErrorResponse{
-			Error:   "Database error",
-			Message: "Failed to retrieve services at location",
-			Stack:   &errStr,
-		})
-	}
+	// Add realtime data
+	s.Data.AddRealtimeData(services, checkDate)
 
-	ctx := c.Context()
-	s.AddRealtimeData(ctx, services, checkDate)
-
+	// Build response
 	response := LocationServicesResponse{
 		Services: services,
 	}
 
-	response.Location.SearchTerm = location
-	response.Location.SearchType = locationType
-	response.Location.Stanox = stanox
-
-	if locationName != "" {
-		response.Location.Name = &locationName
-	}
-	if crsCode != "" {
-		response.Location.CrsCode = &crsCode
-	}
-	if len(tiplocCodes) > 0 {
-		response.Location.TiplocCodes = &tiplocCodes
-	}
+	response.Location = *locationDetails
 
 	return c.JSON(response)
 }

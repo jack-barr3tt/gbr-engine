@@ -1,4 +1,4 @@
 package: api_types
-output: api-types/types.go
+output: types.go
 generate:
   models: true
