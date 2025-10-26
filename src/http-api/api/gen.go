@@ -25,6 +25,14 @@ type HealthResponse struct {
 	Version string `json:"version"`
 }
 
+// Location defines model for Location.
+type Location struct {
+	Crs      *string `json:"crs,omitempty"`
+	FullName *string `json:"full_name,omitempty"`
+	Stanox   *string `json:"stanox,omitempty"`
+	Tiploc   string  `json:"tiploc"`
+}
+
 // LocationServicesResponse defines model for LocationServicesResponse.
 type LocationServicesResponse struct {
 	Location struct {
@@ -57,14 +65,14 @@ type ScheduleLocation struct {
 	Departure       *string `json:"departure,omitempty"`
 
 	// DepartureLateness Lateness in minutes for departure (positive = late, negative = early)
-	DepartureLateness *int    `json:"departure_lateness,omitempty"`
-	Id                int     `json:"id"`
-	LocationOrder     int     `json:"location_order"`
-	LocationType      string  `json:"location_type"`
-	Platform          *string `json:"platform,omitempty"`
-	PublicArrival     *string `json:"public_arrival,omitempty"`
-	PublicDeparture   *string `json:"public_departure,omitempty"`
-	TiplocCode        string  `json:"tiploc_code"`
+	DepartureLateness *int     `json:"departure_lateness,omitempty"`
+	Id                int      `json:"id"`
+	Location          Location `json:"location"`
+	LocationOrder     int      `json:"location_order"`
+	LocationType      string   `json:"location_type"`
+	Platform          *string  `json:"platform,omitempty"`
+	PublicArrival     *string  `json:"public_arrival,omitempty"`
+	PublicDeparture   *string  `json:"public_departure,omitempty"`
 }
 
 // ServiceResponse defines model for ServiceResponse.

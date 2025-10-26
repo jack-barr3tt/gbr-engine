@@ -57,11 +57,11 @@ func (s *APIServer) GetServicesByHeadcode(headcode string) ([]ServiceResponse, e
 		service.ScheduleStartDate = &startDate
 		service.ScheduleEndDate = &endDate
 
-		locations, err := fetchStops(s.DB, service.Id)
+		locationMap, err := fetchStops(s.DB, service.Id)
 		if err != nil {
 			return nil, err
 		}
-		service.Locations = locations
+		service.Locations = locationMap[service.Id]
 		services = append(services, service)
 	}
 
@@ -280,7 +280,7 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 	}
 
 	if len(scheduleIDs) > 0 {
-		allStops, err := fetchStopsBatch(db, scheduleIDs)
+		allStops, err := fetchStops(db, scheduleIDs...)
 		if err != nil {
 			return nil, err
 		}
@@ -293,7 +293,6 @@ func GetScheduledServicesAtLocation(db *pgxpool.Pool, stanox string, date time.T
 
 	return services, nil
 }
-
 
 func (s *APIServer) AddRealtimeData(ctx context.Context, services []ServiceResponse, date time.Time) {
 	if len(services) == 0 {
@@ -334,7 +333,7 @@ func (s *APIServer) AddRealtimeData(ctx context.Context, services []ServiceRespo
 	tiplocs := make(map[string]bool)
 	for i := range services {
 		for j := range services[i].Locations {
-			tiplocs[services[i].Locations[j].TiplocCode] = true
+			tiplocs[services[i].Locations[j].Location.Tiploc] = true
 		}
 	}
 
@@ -376,7 +375,7 @@ func (s *APIServer) AddRealtimeData(ctx context.Context, services []ServiceRespo
 		for j := range services[i].Locations {
 			location := &services[i].Locations[j]
 
-			stanox, hasStanox := tiplocToStanox[location.TiplocCode]
+			stanox, hasStanox := tiplocToStanox[location.Location.Tiploc]
 			if !hasStanox {
 				continue
 			}
@@ -409,19 +408,21 @@ func (s *APIServer) AddRealtimeData(ctx context.Context, services []ServiceRespo
 	}
 }
 
-func fetchStopsBatch(db *pgxpool.Pool, scheduleIDs []int) (map[int][]ScheduleLocation, error) {
+func fetchStops(db *pgxpool.Pool, scheduleIDs ...int) (map[int][]ScheduleLocation, error) {
 	if len(scheduleIDs) == 0 {
 		return make(map[int][]ScheduleLocation), nil
 	}
 
 	rows, err := db.Query(context.Background(), `
-		SELECT schedule_id, id, location_type, tiploc_code,
-			   arrival::text, public_arrival::text,
-			   departure::text, public_departure::text,
-			   platform, location_order
-		FROM schedule_location 
-		WHERE schedule_id = ANY($1)
-		ORDER BY schedule_id, location_order
+		SELECT sl.schedule_id, sl.id, sl.location_type, sl.tiploc_code,
+			   sl.arrival::text, sl.public_arrival::text,
+			   sl.departure::text, sl.public_departure::text,
+			   sl.platform, sl.location_order,
+			   t.stanox, t.crs_code, t.description
+		FROM schedule_location sl
+		LEFT JOIN tiploc t ON sl.tiploc_code = t.tiploc_code
+		WHERE sl.schedule_id = ANY($1)
+		ORDER BY sl.schedule_id, sl.location_order
 	`, scheduleIDs)
 	if err != nil {
 		return nil, err
@@ -432,20 +433,39 @@ func fetchStopsBatch(db *pgxpool.Pool, scheduleIDs []int) (map[int][]ScheduleLoc
 	for rows.Next() {
 		var scheduleID int
 		var location ScheduleLocation
+		var tiplocCode string
+		var stanox, crsCode, fullName sql.NullString
+
 		if err := rows.Scan(
 			&scheduleID,
 			&location.Id,
 			&location.LocationType,
-			&location.TiplocCode,
+			&tiplocCode,
 			&location.Arrival,
 			&location.PublicArrival,
 			&location.Departure,
 			&location.PublicDeparture,
 			&location.Platform,
 			&location.LocationOrder,
+			&stanox,
+			&crsCode,
+			&fullName,
 		); err != nil {
 			return nil, err
 		}
+
+		// Populate the Location object
+		location.Location.Tiploc = tiplocCode
+		if stanox.Valid {
+			location.Location.Stanox = &stanox.String
+		}
+		if crsCode.Valid {
+			location.Location.Crs = &crsCode.String
+		}
+		if fullName.Valid {
+			location.Location.FullName = &fullName.String
+		}
+
 		locationsBySchedule[scheduleID] = append(locationsBySchedule[scheduleID], location)
 	}
 
@@ -454,43 +474,4 @@ func fetchStopsBatch(db *pgxpool.Pool, scheduleIDs []int) (map[int][]ScheduleLoc
 	}
 
 	return locationsBySchedule, nil
-}
-
-func fetchStops(db *pgxpool.Pool, scheduleID int) ([]ScheduleLocation, error) {
-	rows, err := db.Query(context.Background(), `
-		SELECT id, location_type, tiploc_code,
-			   arrival::text, public_arrival::text,
-			   departure::text, public_departure::text,
-			   platform, location_order
-		FROM schedule_location 
-		WHERE schedule_id = $1 
-		ORDER BY location_order
-	`, scheduleID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var locations []ScheduleLocation
-	for rows.Next() {
-		var location ScheduleLocation
-		if err := rows.Scan(
-			&location.Id,
-			&location.LocationType,
-			&location.TiplocCode,
-			&location.Arrival,
-			&location.PublicArrival,
-			&location.Departure,
-			&location.PublicDeparture,
-			&location.Platform,
-			&location.LocationOrder,
-		); err != nil {
-			return nil, err
-		}
-		locations = append(locations, location)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-	return locations, nil
 }

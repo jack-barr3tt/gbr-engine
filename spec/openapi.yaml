@@ -187,6 +187,23 @@ components:
         - signalling_id
         - headcode
         - locations
+    Location:
+      type: object
+      properties:
+        tiploc:
+          type: string
+          example: "STANAIR"
+        stanox:
+          type: string
+          example: "87544"
+        crs:
+          type: string
+          example: "STA"
+        full_name:
+          type: string
+          example: "Stansted Airport"
+      required:
+        - tiploc
     ScheduleLocation:
       type: object
       properties:
@@ -196,9 +213,8 @@ components:
         location_type:
           type: string
           example: "LO"
-        tiploc_code:
-          type: string
-          example: "STANAIR"
+        location:
+          $ref: "#/components/schemas/Location"
         arrival:
           type: string
           format: time
@@ -240,7 +256,7 @@ components:
       required:
         - id
         - location_type
-        - tiploc_code
+        - location
         - location_order
     LocationServicesResponse:
       type: object
