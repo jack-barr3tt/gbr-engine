@@ -12,6 +12,12 @@ type ServerInterface interface {
 	// Health check endpoint
 	// (GET /health)
 	GetHealth(c *fiber.Ctx) error
+	// Get all locations
+	// (GET /locations)
+	GetLocations(c *fiber.Ctx) error
+	// Get all operators
+	// (GET /operators)
+	GetOperators(c *fiber.Ctx) error
 	// Query services with filters
 	// (POST /services)
 	QueryServices(c *fiber.Ctx) error
@@ -28,6 +34,18 @@ type MiddlewareFunc fiber.Handler
 func (siw *ServerInterfaceWrapper) GetHealth(c *fiber.Ctx) error {
 
 	return siw.Handler.GetHealth(c)
+}
+
+// GetLocations operation middleware
+func (siw *ServerInterfaceWrapper) GetLocations(c *fiber.Ctx) error {
+
+	return siw.Handler.GetLocations(c)
+}
+
+// GetOperators operation middleware
+func (siw *ServerInterfaceWrapper) GetOperators(c *fiber.Ctx) error {
+
+	return siw.Handler.GetOperators(c)
 }
 
 // QueryServices operation middleware
@@ -58,6 +76,10 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 	}
 
 	router.Get(options.BaseURL+"/health", wrapper.GetHealth)
+
+	router.Get(options.BaseURL+"/locations", wrapper.GetLocations)
+
+	router.Get(options.BaseURL+"/operators", wrapper.GetOperators)
 
 	router.Post(options.BaseURL+"/services", wrapper.QueryServices)
 
