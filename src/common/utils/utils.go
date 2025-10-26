@@ -5,14 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
-	"github.com/go-stomp/stomp/v3"
 	"github.com/jack-barr3tt/gbr-engine/src/common/types"
 	"github.com/jackc/pgx/v5/pgxpool"
-	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -137,158 +134,6 @@ func LoadScheduleFromDatabase(ctx context.Context, db *pgxpool.Pool, trainUID st
 	}, nil
 }
 
-func NewRabbitConnection() (*amqp.Connection, *amqp.Channel, error) {
-	mqUser := os.Getenv("MQ_USER")
-	mqPassword := os.Getenv("MQ_PASSWORD")
-	mqHost := os.Getenv("MQ_HOST")
-	mqPort := os.Getenv("MQ_PORT")
-
-	config := amqp.Config{
-		Heartbeat: 60 * time.Second,
-		Locale:    "en_US",
-	}
-
-	connection, err := amqp.DialConfig(fmt.Sprintf("amqp://%s:%s@%s:%s/", mqUser, mqPassword, mqHost, mqPort), config)
-	if err != nil {
-		return nil, nil, err
-	}
-	channel, err := connection.Channel()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return connection, channel, nil
-}
-
-func NewRabbitConnectionOnly() (*amqp.Connection, error) {
-	mqUser := os.Getenv("MQ_USER")
-	mqPassword := os.Getenv("MQ_PASSWORD")
-	mqHost := os.Getenv("MQ_HOST")
-	mqPort := os.Getenv("MQ_PORT")
-
-	config := amqp.Config{
-		Heartbeat: 60 * time.Second,
-		Locale:    "en_US",
-	}
-
-	connection, err := amqp.DialConfig(fmt.Sprintf("amqp://%s:%s@%s:%s/", mqUser, mqPassword, mqHost, mqPort), config)
-	if err != nil {
-		return nil, err
-	}
-
-	return connection, nil
-}
-
-func NewNRStompConnection() (*stomp.Conn, error) {
-	url := os.Getenv("NR_FEEDS_ENDPOINT")
-	username := os.Getenv("NR_FEEDS_USERNAME")
-	password := os.Getenv("NR_FEEDS_PASSWORD")
-
-	conn, err := stomp.Dial("tcp", url,
-		stomp.ConnOpt.Login(username, password),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return conn, nil
-}
-
-func NewRedisClient() *redis.Client {
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		// default to the redis service in the cluster
-		redisAddr = "redis:6379"
-	}
-
-	rdb := redis.NewClient(&redis.Options{
-		Addr: redisAddr,
-		DB:   0,
-	})
-
-	return rdb
-}
-
-func NewPostgresConnection() (*pgxpool.Pool, error) {
-	host := os.Getenv("POSTGRES_HOST")
-	port := os.Getenv("POSTGRES_PORT")
-	user := os.Getenv("POSTGRES_USER")
-	password := os.Getenv("POSTGRES_PASSWORD")
-	dbname := os.Getenv("POSTGRES_DB")
-
-	dbConnectionString := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname,
-	)
-
-	connection, err := pgxpool.New(context.Background(), dbConnectionString)
-	if err != nil {
-		return nil, err
-	}
-
-	return connection, nil
-}
-
-func UnmarshalTrustMessages(data string) ([]types.TrustMessage, error) {
-	var messages []types.TrustMessage
-	err := json.Unmarshal([]byte(data), &messages)
-	return messages, err
-}
-
-func UnmarshalTDMessages(data string) ([]types.TDCMsgBody, []types.TDSMsgBody, error) {
-	var raws []json.RawMessage
-	if err := json.Unmarshal([]byte(data), &raws); err != nil {
-		return nil, nil, err
-	}
-
-	var tdCMsgs []types.TDCMsgBody
-	var tdSMsgs []types.TDSMsgBody
-
-	for _, raw := range raws {
-		var tdC types.TDCMsgEnvelope
-		if err := json.Unmarshal(raw, &tdC); err == nil {
-			if tdC.CAMsgBody != nil {
-				tdCMsgs = append(tdCMsgs, *tdC.CAMsgBody)
-			}
-			if tdC.CBMsgBody != nil {
-				tdCMsgs = append(tdCMsgs, *tdC.CBMsgBody)
-			}
-			if tdC.CCMsgBody != nil {
-				tdCMsgs = append(tdCMsgs, *tdC.CCMsgBody)
-			}
-			if tdC.CTMsgBody != nil {
-				tdCMsgs = append(tdCMsgs, *tdC.CTMsgBody)
-			}
-			continue
-		}
-
-		var tdS types.TDSMsgEnvelope
-		if err := json.Unmarshal(raw, &tdS); err == nil {
-			if tdS.SFMsgBody != nil {
-				tdSMsgs = append(tdSMsgs, *tdS.SFMsgBody)
-			}
-			if tdS.SGMsgBody != nil {
-				tdSMsgs = append(tdSMsgs, *tdS.SGMsgBody)
-			}
-			if tdS.SHMsgBody != nil {
-				tdSMsgs = append(tdSMsgs, *tdS.SHMsgBody)
-			}
-			continue
-		}
-	}
-
-	return tdCMsgs, tdSMsgs, nil
-}
-
-func UnmarshalVSTP(jsonStr string) (*types.VSTPMessage, error) {
-	var vstpMsg types.VSTPMessage
-	err := json.Unmarshal([]byte(jsonStr), &vstpMsg)
-	if err != nil {
-		return nil, err
-	}
-	return &vstpMsg, nil
-}
-
 func NullString(s string) *string {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
@@ -347,10 +192,6 @@ func BuildActivationKey(trainID string) string {
 
 func BuildScheduleKey(trainUID, runDate string) string {
 	return fmt.Sprintf("schedule:%s:%s", trainUID, runDate)
-}
-
-func BuildTiplocKey(tiplocCode string) string {
-	return fmt.Sprintf("tiploc:%s", tiplocCode)
 }
 
 func FormatRunDate(t time.Time) string {
@@ -424,52 +265,6 @@ func FormatPlannedTime(s string) string {
 	return s
 }
 
-// GetStanoxByCRS returns the STANOX for a given CRS code.
-func GetStanoxByCRS(ctx context.Context, db *pgxpool.Pool, crsCode string) (string, error) {
-	var stanox sql.NullString
-	err := db.QueryRow(ctx, `
-		SELECT stanox FROM tiploc 
-		WHERE crs_code = $1
-		LIMIT 1
-	`, crsCode).Scan(&stanox)
-	if err != nil {
-		return "", err
-	}
-	if !stanox.Valid {
-		return "", sql.ErrNoRows
-	}
-	return stanox.String, nil
-}
-
-// GetStanoxByTiploc returns the STANOX for a given TIPLOC code.
-func GetStanoxByTiploc(ctx context.Context, db *pgxpool.Pool, tiploc string) (string, error) {
-	var stanox sql.NullString
-	err := db.QueryRow(ctx, `
-		SELECT stanox FROM tiploc 
-		WHERE tiploc_code = $1
-	`, tiploc).Scan(&stanox)
-	if err != nil {
-		return "", err
-	}
-	if !stanox.Valid {
-		return "", sql.ErrNoRows
-	}
-	return stanox.String, nil
-}
-
-// GetStanoxByTiplocCached caches TIPLOC->STANOX lookups in Redis under key tiploc:<code> for the provided TTL.
-func GetStanoxByTiplocCached(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, tiploc string, ttl time.Duration) (string, error) {
-	if rdb != nil {
-		if cached, err := rdb.Get(ctx, BuildTiplocKey(tiploc)).Result(); err == nil && cached != "" {
-			return cached, nil
-		}
-	}
-	stanox, err := GetStanoxByTiploc(ctx, db, tiploc)
-	if err != nil {
-		return "", err
-	}
-	if rdb != nil {
-		_ = rdb.Set(ctx, BuildTiplocKey(tiploc), stanox, ttl).Err()
-	}
-	return stanox, nil
+func Ptr[T any](v T) *T {
+	return &v
 }
