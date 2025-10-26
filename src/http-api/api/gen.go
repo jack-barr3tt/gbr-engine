@@ -4,11 +4,7 @@
 package api
 
 import (
-	"fmt"
-	"net/url"
-
 	"github.com/gofiber/fiber/v2"
-	"github.com/oapi-codegen/runtime"
 )
 
 // ServerInterface represents all server handlers.
@@ -16,12 +12,9 @@ type ServerInterface interface {
 	// Health check endpoint
 	// (GET /health)
 	GetHealth(c *fiber.Ctx) error
-	// Get services by headcode
-	// (GET /service)
-	GetService(c *fiber.Ctx, params GetServiceParams) error
-	// Get services currently at a location
-	// (GET /services-at-location)
-	GetServicesAtLocation(c *fiber.Ctx, params GetServicesAtLocationParams) error
+	// Query services with filters
+	// (POST /services)
+	QueryServices(c *fiber.Ctx) error
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -37,88 +30,10 @@ func (siw *ServerInterfaceWrapper) GetHealth(c *fiber.Ctx) error {
 	return siw.Handler.GetHealth(c)
 }
 
-// GetService operation middleware
-func (siw *ServerInterfaceWrapper) GetService(c *fiber.Ctx) error {
+// QueryServices operation middleware
+func (siw *ServerInterfaceWrapper) QueryServices(c *fiber.Ctx) error {
 
-	var err error
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetServiceParams
-
-	var query url.Values
-	query, err = url.ParseQuery(string(c.Request().URI().QueryString()))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for query string: %w", err).Error())
-	}
-
-	// ------------- Required query parameter "headcode" -------------
-
-	if paramValue := c.Query("headcode"); paramValue != "" {
-
-	} else {
-		err = fmt.Errorf("Query argument headcode is required, but not found")
-		c.Status(fiber.StatusBadRequest).JSON(err)
-		return err
-	}
-
-	err = runtime.BindQueryParameter("form", true, true, "headcode", query, &params.Headcode)
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter headcode: %w", err).Error())
-	}
-
-	return siw.Handler.GetService(c, params)
-}
-
-// GetServicesAtLocation operation middleware
-func (siw *ServerInterfaceWrapper) GetServicesAtLocation(c *fiber.Ctx) error {
-
-	var err error
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetServicesAtLocationParams
-
-	var query url.Values
-	query, err = url.ParseQuery(string(c.Request().URI().QueryString()))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for query string: %w", err).Error())
-	}
-
-	// ------------- Optional query parameter "name" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "name", query, &params.Name)
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter name: %w", err).Error())
-	}
-
-	// ------------- Optional query parameter "crs" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "crs", query, &params.Crs)
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter crs: %w", err).Error())
-	}
-
-	// ------------- Optional query parameter "tiploc" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "tiploc", query, &params.Tiploc)
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter tiploc: %w", err).Error())
-	}
-
-	// ------------- Optional query parameter "stanox" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "stanox", query, &params.Stanox)
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter stanox: %w", err).Error())
-	}
-
-	// ------------- Optional query parameter "date" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "date", query, &params.Date)
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Errorf("Invalid format for parameter date: %w", err).Error())
-	}
-
-	return siw.Handler.GetServicesAtLocation(c, params)
+	return siw.Handler.QueryServices(c)
 }
 
 // FiberServerOptions provides options for the Fiber server.
@@ -144,8 +59,6 @@ func RegisterHandlersWithOptions(router fiber.Router, si ServerInterface, option
 
 	router.Get(options.BaseURL+"/health", wrapper.GetHealth)
 
-	router.Get(options.BaseURL+"/service", wrapper.GetService)
-
-	router.Get(options.BaseURL+"/services-at-location", wrapper.GetServicesAtLocation)
+	router.Post(options.BaseURL+"/services", wrapper.QueryServices)
 
 }

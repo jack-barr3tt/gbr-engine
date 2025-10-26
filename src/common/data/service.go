@@ -26,55 +26,13 @@ type LocationFilter struct {
 	TimeTo   *time.Time
 }
 
-func getRunDates(filters ServiceFilters) (time.Time, time.Time) {
-	dates := make(map[time.Time]bool)
-
-	for _, locFilter := range filters.PassesThrough {
-		if locFilter.TimeFrom != nil && locFilter.TimeTo != nil {
-			start := locFilter.TimeFrom.Truncate(24 * time.Hour)
-			for d := start; !d.After(locFilter.TimeTo.Truncate(24 * time.Hour)); d = d.Add(24 * time.Hour) {
-				dates[d] = true
-			}
-		}
-	}
-
-	if len(dates) == 0 {
-		return time.Time{}, time.Time{}
-	}
-
-	var minDate, maxDate time.Time
-	for d := range dates {
-		if minDate.IsZero() && maxDate.IsZero() {
-			minDate, maxDate = d, d
-			continue
-		}
-		if d.Before(minDate) {
-			minDate = d
-		}
-		if d.After(maxDate) {
-			maxDate = d
-		}
-	}
-	return minDate, maxDate
-}
-
 func (dc *DataClient) buildServiceFilter(filters ServiceFilters) (string, []interface{}) {
 	conditions := []string{}
 	args := []interface{}{}
 	argIndex := 1
 
-	minDate, maxDate := getRunDates(filters)
-	if !minDate.IsZero() && !maxDate.IsZero() {
-		conditions = append(conditions, fmt.Sprintf("s.schedule_start_date <= $%d", argIndex))
-		args = append(args, maxDate)
-		argIndex++
-		conditions = append(conditions, fmt.Sprintf("s.schedule_end_date >= $%d", argIndex))
-		args = append(args, minDate)
-		argIndex++
-	}
-
 	if filters.Headcode != nil {
-		conditions = append(conditions, fmt.Sprintf("s.headcode = $%d", argIndex))
+		conditions = append(conditions, fmt.Sprintf("s.signalling_id = $%d", argIndex))
 		args = append(args, *filters.Headcode)
 		argIndex++
 	}
@@ -85,17 +43,48 @@ func (dc *DataClient) buildServiceFilter(filters ServiceFilters) (string, []inte
 		argIndex++
 	}
 
+	dateSet := make(map[time.Time]bool)
+	for _, locFilter := range filters.PassesThrough {
+		if locFilter.TimeFrom != nil {
+			dateSet[locFilter.TimeFrom.Truncate(24*time.Hour)] = true
+		}
+	}
+
+	if len(dateSet) > 0 {
+		var minDate, maxDate time.Time
+		for d := range dateSet {
+			if minDate.IsZero() || d.Before(minDate) {
+				minDate = d
+			}
+			if maxDate.IsZero() || d.After(maxDate) {
+				maxDate = d
+			}
+		}
+		conditions = append(conditions, fmt.Sprintf("s.schedule_start_date <= $%d", argIndex))
+		args = append(args, maxDate)
+		argIndex++
+		conditions = append(conditions, fmt.Sprintf("s.schedule_end_date >= $%d", argIndex))
+		args = append(args, minDate)
+		argIndex++
+	}
+
 	for _, locFilter := range filters.PassesThrough {
 		condParts := []string{fmt.Sprintf("EXISTS (SELECT 1 FROM schedule_location sl WHERE sl.schedule_id = s.id AND sl.tiploc_code IN (SELECT t.tiploc_code FROM tiploc t WHERE t.stanox = $%d)", argIndex)}
 		args = append(args, locFilter.Stanox)
 		argIndex++
 
-		if locFilter.TimeFrom != nil {
+		if locFilter.TimeFrom != nil && locFilter.TimeTo != nil {
+			timeFrom := locFilter.TimeFrom.Format("15:04:05")
+			timeTo := locFilter.TimeTo.Format("15:04:05")
+
+			condParts = append(condParts, fmt.Sprintf("((sl.arrival::time BETWEEN $%d AND $%d) OR (sl.departure::time BETWEEN $%d AND $%d))", argIndex, argIndex+1, argIndex, argIndex+1))
+			args = append(args, timeFrom, timeTo)
+			argIndex += 2
+		} else if locFilter.TimeFrom != nil {
 			condParts = append(condParts, fmt.Sprintf("((sl.arrival::time >= $%d) OR (sl.departure::time >= $%d))", argIndex, argIndex))
 			args = append(args, locFilter.TimeFrom.Format("15:04:05"))
 			argIndex++
-		}
-		if locFilter.TimeTo != nil {
+		} else if locFilter.TimeTo != nil {
 			condParts = append(condParts, fmt.Sprintf("((sl.arrival::time <= $%d) OR (sl.departure::time <= $%d))", argIndex, argIndex))
 			args = append(args, locFilter.TimeTo.Format("15:04:05"))
 			argIndex++
@@ -130,7 +119,7 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) ([]api_type
 	}
 	defer rows.Close()
 
-	var services []api_types.ServiceResponse
+	services := []api_types.ServiceResponse{}
 	var scheduleIDs []int
 
 	rowCount := 0
@@ -199,17 +188,34 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) ([]api_type
 		}
 	}
 
-	minDate, maxDate := getRunDates(filters)
-	if !minDate.IsZero() && minDate.Equal(maxDate) {
-		validServices := make([]api_types.ServiceResponse, 0, len(services))
-		for _, service := range services {
-			if service.ScheduleDaysRuns != nil && service.ScheduleStartDate != nil && service.ScheduleEndDate != nil {
-				if isScheduleValidForDate(*service.ScheduleDaysRuns, service.ScheduleStartDate.Time, service.ScheduleEndDate.Time, minDate) {
-					validServices = append(validServices, service)
+	if len(filters.PassesThrough) > 0 {
+		var earliestDate time.Time
+		for _, locFilter := range filters.PassesThrough {
+			if locFilter.TimeFrom != nil {
+				checkDate := locFilter.TimeFrom.Truncate(24 * time.Hour)
+				if earliestDate.IsZero() || checkDate.Before(earliestDate) {
+					earliestDate = checkDate
 				}
 			}
 		}
-		services = validServices
+
+		if !earliestDate.IsZero() {
+			validServices := make([]api_types.ServiceResponse, 0, len(services))
+			for _, service := range services {
+				if service.ScheduleDaysRuns == nil || service.ScheduleStartDate == nil || service.ScheduleEndDate == nil {
+					continue
+				}
+
+				if !isScheduleValidForDate(*service.ScheduleDaysRuns, service.ScheduleStartDate.Time, service.ScheduleEndDate.Time, earliestDate) {
+					continue
+				}
+
+				if matchesLocationFilters(service, filters.PassesThrough, earliestDate) {
+					validServices = append(validServices, service)
+				}
+			}
+			services = validServices
+		}
 	}
 
 	return services, nil
@@ -220,7 +226,7 @@ func (dc *DataClient) fetchScheduleLocations(scheduleIDs ...int) (map[int][]api_
 	if len(scheduleIDs) == 0 {
 		return make(map[int][]api_types.ScheduleLocation), nil
 	}
-	
+
 	rows, err := dc.pg.Query(context.Background(), `
 		SELECT sl.schedule_id, sl.id, sl.location_type, sl.tiploc_code,
 			   sl.arrival::text, sl.public_arrival::text,
@@ -360,8 +366,103 @@ func isScheduleValidForDate(daysRuns string, startDate, endDate, checkDate time.
 	return daysRuns[dayOfWeek-1] == '1'
 }
 
+func matchesLocationFilters(service api_types.ServiceResponse, filters []LocationFilter, baseDate time.Time) bool {
+	locationsByStanox := make(map[string][]api_types.ScheduleLocation)
+	for _, loc := range service.Locations {
+		locationsByStanox[loc.Location.Stanox] = append(locationsByStanox[loc.Location.Stanox], loc)
+	}
 
+	locationDates := make(map[int]time.Time)
+	currentDate := baseDate
+	var prevTime time.Time
 
+	for _, loc := range service.Locations {
+		var locTime time.Time
+		if loc.Departure != nil && *loc.Departure != "" {
+			parsed, err := time.Parse("15:04:05", *loc.Departure)
+			if err == nil {
+				locTime = parsed
+			}
+		} else if loc.Arrival != nil && *loc.Arrival != "" {
+			parsed, err := time.Parse("15:04:05", *loc.Arrival)
+			if err == nil {
+				locTime = parsed
+			}
+		}
+
+		if !prevTime.IsZero() && !locTime.IsZero() {
+			if locTime.Hour() < prevTime.Hour() || (locTime.Hour() == prevTime.Hour() && locTime.Minute() < prevTime.Minute()) {
+				currentDate = currentDate.Add(24 * time.Hour)
+			}
+		}
+
+		locationDates[loc.LocationOrder] = currentDate
+		if !locTime.IsZero() {
+			prevTime = locTime
+		}
+	}
+
+	for _, filter := range filters {
+		matchFound := false
+		locations := locationsByStanox[filter.Stanox]
+
+		for _, loc := range locations {
+			if filter.TimeFrom == nil && filter.TimeTo == nil {
+				matchFound = true
+				break
+			}
+
+			actualDate := locationDates[loc.LocationOrder]
+
+			if filter.TimeFrom != nil {
+				filterDate := filter.TimeFrom.Truncate(24 * time.Hour)
+
+				if !actualDate.Equal(filterDate) {
+					continue
+				}
+
+				var locTime time.Time
+				if loc.Arrival != nil && *loc.Arrival != "" {
+					parsed, _ := time.Parse("15:04:05", *loc.Arrival)
+					locTime = parsed
+				}
+				if loc.Departure != nil && *loc.Departure != "" {
+					parsed, _ := time.Parse("15:04:05", *loc.Departure)
+					if locTime.IsZero() || parsed.After(locTime) {
+						locTime = parsed
+					}
+				}
+
+				if !locTime.IsZero() {
+					locTimeSeconds := locTime.Hour()*3600 + locTime.Minute()*60 + locTime.Second()
+
+					if filter.TimeFrom != nil {
+						filterTimeFrom := filter.TimeFrom.Hour()*3600 + filter.TimeFrom.Minute()*60 + filter.TimeFrom.Second()
+						if locTimeSeconds < filterTimeFrom {
+							continue
+						}
+					}
+
+					if filter.TimeTo != nil {
+						filterTimeTo := filter.TimeTo.Hour()*3600 + filter.TimeTo.Minute()*60 + filter.TimeTo.Second()
+						if locTimeSeconds > filterTimeTo {
+							continue
+						}
+					}
+
+					matchFound = true
+					break
+				}
+			}
+		}
+
+		if !matchFound {
+			return false
+		}
+	}
+
+	return true
+}
 
 func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date time.Time) {
 	if len(services) == 0 {
@@ -405,7 +506,7 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 			}
 		}
 	}
-	
+
 	tiplocToStanox := make(map[string]string)
 	stanoxMutex := &sync.Mutex{}
 	stanoxWg := &sync.WaitGroup{}

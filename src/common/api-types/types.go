@@ -4,6 +4,8 @@
 package api_types
 
 import (
+	"time"
+
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
@@ -28,10 +30,19 @@ type Location struct {
 	TiplocCodes []string `json:"tiploc_codes"`
 }
 
-// LocationServicesResponse defines model for LocationServicesResponse.
-type LocationServicesResponse struct {
-	Location Location          `json:"location"`
-	Services []ServiceResponse `json:"services"`
+// LocationFilter defines model for LocationFilter.
+type LocationFilter struct {
+	// Crs The CRS code of the location (alternative to stanox)
+	Crs *string `json:"crs,omitempty"`
+
+	// Name The station name (alternative to stanox)
+	Name *string `json:"name,omitempty"`
+
+	// Stanox The STANOX code of the location
+	Stanox *string `json:"stanox,omitempty"`
+
+	// Tiploc The TIPLOC code of the location (alternative to stanox)
+	Tiploc *string `json:"tiploc,omitempty"`
 }
 
 // NotFoundResponse defines model for NotFoundResponse.
@@ -69,6 +80,26 @@ type ScheduleLocation struct {
 	PublicDeparture   *string  `json:"public_departure,omitempty"`
 }
 
+// ServiceQueryRequest defines model for ServiceQueryRequest.
+type ServiceQueryRequest struct {
+	// Headcode Filter by headcode
+	Headcode *string `json:"headcode,omitempty"`
+
+	// OperatorCode Filter by operator/TOC code
+	OperatorCode *string `json:"operator_code,omitempty"`
+
+	// PassesThrough Filter by locations the service passes through
+	PassesThrough *[]struct {
+		LocationFilter *LocationFilter `json:"location_filter,omitempty"`
+
+		// TimeFrom Earliest time at this location
+		TimeFrom *time.Time `json:"time_from,omitempty"`
+
+		// TimeTo Latest time at this location
+		TimeTo *time.Time `json:"time_to,omitempty"`
+	} `json:"passes_through,omitempty"`
+}
+
 // ServiceResponse defines model for ServiceResponse.
 type ServiceResponse struct {
 	Headcode          string              `json:"headcode"`
@@ -84,26 +115,5 @@ type ServiceResponse struct {
 	TrainUid          string              `json:"train_uid"`
 }
 
-// GetServiceParams defines parameters for GetService.
-type GetServiceParams struct {
-	// Headcode The headcode of the services to retrieve
-	Headcode string `form:"headcode" json:"headcode"`
-}
-
-// GetServicesAtLocationParams defines parameters for GetServicesAtLocation.
-type GetServicesAtLocationParams struct {
-	// Name The station name to search for trains at
-	Name *string `form:"name,omitempty" json:"name,omitempty"`
-
-	// Crs The CRS code of the station to search for trains at
-	Crs *string `form:"crs,omitempty" json:"crs,omitempty"`
-
-	// Tiploc The TIPLOC code of the location to search for trains at
-	Tiploc *string `form:"tiploc,omitempty" json:"tiploc,omitempty"`
-
-	// Stanox The STANOX code of the location to search for trains at
-	Stanox *string `form:"stanox,omitempty" json:"stanox,omitempty"`
-
-	// Date The date to search for services (YYYY-MM-DD format). Defaults to today.
-	Date *openapi_types.Date `form:"date,omitempty" json:"date,omitempty"`
-}
+// QueryServicesJSONRequestBody defines body for QueryServices for application/json ContentType.
+type QueryServicesJSONRequestBody = ServiceQueryRequest

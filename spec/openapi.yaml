@@ -21,19 +21,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /service:
-    get:
-      summary: Get services by headcode
-      description: Returns schedule information for all services with the given headcode
-      operationId: getService
-      parameters:
-        - name: headcode
-          in: query
-          required: true
-          description: The headcode of the services to retrieve
-          schema:
-            type: string
-            example: "1B73"
+  /services:
+    post:
+      summary: Query services with filters
+      description: Returns schedule information for services matching the provided filters
+      operationId: queryServices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceQueryRequest"
       responses:
         "200":
           description: Services found
@@ -61,75 +59,56 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /services-at-location:
-    get:
-      summary: Get services currently at a location
-      description: Returns all train services currently at a specific location based on real-time train tracking data. Specify exactly one of the location parameters.
-      operationId: getServicesAtLocation
-      parameters:
-        - name: name
-          in: query
-          required: false
-          description: The station name to search for trains at
-          schema:
-            type: string
-            example: "London Paddington"
-        - name: crs
-          in: query
-          required: false
-          description: The CRS code of the station to search for trains at
-          schema:
-            type: string
-            example: "PAD"
-        - name: tiploc
-          in: query
-          required: false
-          description: The TIPLOC code of the location to search for trains at
-          schema:
-            type: string
-            example: "PADTON"
-        - name: stanox
-          in: query
-          required: false
-          description: The STANOX code of the location to search for trains at
-          schema:
-            type: string
-            example: "87544"
-        - name: date
-          in: query
-          required: false
-          description: The date to search for services (YYYY-MM-DD format). Defaults to today.
-          schema:
-            type: string
-            format: date
-            example: "2025-10-12"
-      responses:
-        "200":
-          description: Services at location found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LocationServicesResponse"
-        "400":
-          description: Bad request - must specify exactly one location parameter
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: Location not found or no services at location
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/NotFoundResponse"
-        "500":
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
+    ServiceQueryRequest:
+      type: object
+      properties:
+        headcode:
+          type: string
+          description: Filter by headcode
+          example: "1B73"
+        operator_code:
+          type: string
+          description: Filter by operator/TOC code
+          example: "GW"
+        passes_through:
+          type: array
+          description: Filter by locations the service passes through
+          items:
+            type: object
+            properties:
+              location_filter:
+                $ref: "#/components/schemas/LocationFilter"
+              time_from:
+                type: string
+                format: date-time
+                description: Earliest time at this location
+                example: "2025-10-26T00:00:00Z"
+              time_to:
+                type: string
+                format: date-time
+                description: Latest time at this location
+                example: "2025-10-26T23:59:59Z"
+    LocationFilter:
+      type: object
+      properties:
+        stanox:
+          type: string
+          description: The STANOX code of the location
+          example: "87544"
+        crs:
+          type: string
+          description: The CRS code of the location (alternative to stanox)
+          example: "PAD"
+        tiploc:
+          type: string
+          description: The TIPLOC code of the location (alternative to stanox)
+          example: "PADTON"
+        name:
+          type: string
+          description: The station name (alternative to stanox)
+          example: "London Paddington"
     HealthResponse:
       type: object
       properties:

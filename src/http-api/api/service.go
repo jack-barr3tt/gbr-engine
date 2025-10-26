@@ -8,17 +8,50 @@ import (
 	"github.com/jack-barr3tt/gbr-engine/src/common/data"
 )
 
-func (s *APIServer) GetService(c *fiber.Ctx, params GetServiceParams) error {
-	headcode := params.Headcode
-	if headcode == "" {
+func (s *APIServer) QueryServices(c *fiber.Ctx) error {
+	var req ServiceQueryRequest
+	if err := c.BodyParser(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(ErrorResponse{
 			Error:   "Bad Request",
-			Message: "headcode query parameter is required",
+			Message: "Invalid request body",
 		})
 	}
 
-	filters := data.ServiceFilters{
-		Headcode: &headcode,
+	filters := data.ServiceFilters{}
+
+	if req.Headcode != nil {
+		filters.Headcode = req.Headcode
+	}
+
+	if req.OperatorCode != nil {
+		filters.OperatorCode = req.OperatorCode
+	}
+
+	if req.PassesThrough != nil && len(*req.PassesThrough) > 0 {
+		filters.PassesThrough = make([]data.LocationFilter, 0, len(*req.PassesThrough))
+		for _, loc := range *req.PassesThrough {
+			stanox, err := s.StanoxFromLocationFilter(*loc.LocationFilter)
+			if err != nil {
+				return HandleError(c, err)
+			}
+			if stanox == "" {
+				return c.Status(http.StatusBadRequest).JSON(ErrorResponse{
+					Error:   "Bad Request",
+					Message: "Must specify one of: stanox, crs, tiploc, or name for location filter",
+				})
+			}
+
+			locFilter := data.LocationFilter{
+				Stanox: stanox,
+			}
+			if loc.TimeFrom != nil {
+				locFilter.TimeFrom = loc.TimeFrom
+			}
+			if loc.TimeTo != nil {
+				locFilter.TimeTo = loc.TimeTo
+			}
+			filters.PassesThrough = append(filters.PassesThrough, locFilter)
+		}
 	}
 
 	services, err := s.Data.GetServicesWithFilters(filters)
@@ -26,83 +59,21 @@ func (s *APIServer) GetService(c *fiber.Ctx, params GetServiceParams) error {
 		errStr := err.Error()
 		return c.Status(http.StatusInternalServerError).JSON(ErrorResponse{
 			Error:   "Database error",
-			Message: "Failed to retrieve services by headcode",
+			Message: "Failed to retrieve services",
 			Stack:   &errStr,
 		})
 	}
 
-	// Check if any services were found
-	if len(services) == 0 {
-		return c.Status(http.StatusNotFound).JSON(NotFoundResponse{
-			Error: "No services found",
-		})
+	if services == nil {
+		services = []ServiceResponse{}
 	}
 
-	s.Data.AddRealtimeData(services, time.Now())
+	// Add realtime data based on the date range from filters
+	realtimeDate := time.Now()
+	if len(filters.PassesThrough) > 0 && filters.PassesThrough[0].TimeFrom != nil {
+		realtimeDate = *filters.PassesThrough[0].TimeFrom
+	}
+	s.Data.AddRealtimeData(services, realtimeDate)
 
 	return c.JSON(services)
-}
-
-func (s *APIServer) GetServicesAtLocation(c *fiber.Ctx, params GetServicesAtLocationParams) error {
-	// Resolve location to stanox
-	var stanox string
-	var err error
-
-	if params.Name != nil {
-		stanox, err = s.Data.GetStanoxByLocationName(*params.Name)
-	}
-	if params.Crs != nil {
-		stanox, err = s.Data.GetStanoxByCRS(*params.Crs)
-	}
-	if params.Tiploc != nil {
-		stanox, err = s.Data.GetStanoxByTiploc(*params.Tiploc)
-	}
-	if params.Stanox != nil {
-		stanox = *params.Stanox
-	}
-	if err != nil {
-		return HandleError(c, err)
-	}
-
-	// Determine check date
-	var checkDate time.Time
-	if params.Date != nil {
-		checkDate = params.Date.Time
-	} else {
-		checkDate = time.Now().UTC().Truncate(24 * time.Hour)
-	}
-
-	// Get location details
-	locationDetails, err := s.Data.GetLocationDetails(stanox)
-	if err != nil {
-		return HandleError(c, err)
-	}
-
-	// Create time range for the entire day
-	dayStart := checkDate.Truncate(24 * time.Hour)
-	dayEnd := dayStart.Add(24*time.Hour - time.Second)
-
-	// Get services with filters (includes day-of-week filtering)
-	services, err := s.Data.GetServicesWithFilters(data.ServiceFilters{
-		PassesThrough: []data.LocationFilter{{
-			Stanox:   stanox,
-			TimeFrom: &dayStart,
-			TimeTo:   &dayEnd,
-		}},
-	})
-	if err != nil {
-		return HandleError(c, err)
-	}
-
-	// Add realtime data
-	s.Data.AddRealtimeData(services, checkDate)
-
-	// Build response
-	response := LocationServicesResponse{
-		Services: services,
-	}
-
-	response.Location = *locationDetails
-
-	return c.JSON(response)
 }
