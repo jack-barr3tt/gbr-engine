@@ -21,6 +21,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /schema:
+    get:
+      summary: Get OpenAPI schema
+      description: Returns the OpenAPI specification for this API in JSON format
+      operationId: getSchema
+      responses:
+        "200":
+          description: OpenAPI schema in JSON format
+          content:
+            application/json:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /services:
     post:
       summary: Query services with filters

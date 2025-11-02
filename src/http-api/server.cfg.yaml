@@ -2,5 +2,4 @@ package: api
 output: api/gen.go
 generate:
   fiber-server: true
-import-mapping:
-  ../../spec/openapi.yaml: github.com/jack-barr3tt/gbr-engine/src/common/api-types
+  embedded-spec: true
