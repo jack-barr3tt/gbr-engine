@@ -56,9 +56,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ServiceResponse"
+                $ref: "#/components/schemas/ServiceQueryResponse"
         "400":
           description: Bad request
           content:
@@ -148,6 +146,20 @@ components:
                 format: date-time
                 description: Latest time at this location
                 example: "2025-10-26T23:59:59Z"
+        offset:
+          type: integer
+          description: Number of services to skip (0-indexed)
+          minimum: 0
+          maximum: 1000
+          default: 0
+          example: 0
+        limit:
+          type: integer
+          description: Maximum number of services to return
+          minimum: 1
+          maximum: 100
+          default: 50
+          example: 50
     LocationFilter:
       type: object
       properties:
@@ -179,6 +191,42 @@ components:
       required:
         - status
         - version
+    ServiceQueryResponse:
+      type: object
+      properties:
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceResponse"
+        pagination:
+          $ref: "#/components/schemas/PaginationInfo"
+      required:
+        - services
+        - pagination
+    PaginationInfo:
+      type: object
+      properties:
+        offset:
+          type: integer
+          description: Number of services skipped
+          example: 0
+        limit:
+          type: integer
+          description: Maximum number of services returned
+          example: 50
+        returned:
+          type: integer
+          description: Actual number of services returned in this response
+          example: 50
+        total_results:
+          type: integer
+          description: Total number of services matching the query
+          example: 150
+      required:
+        - offset
+        - limit
+        - returned
+        - total_results
     ServiceResponse:
       type: object
       properties:

@@ -56,6 +56,21 @@ type Operator struct {
 	Name string `json:"name"`
 }
 
+// PaginationInfo defines model for PaginationInfo.
+type PaginationInfo struct {
+	// Limit Maximum number of services returned
+	Limit int `json:"limit"`
+
+	// Offset Number of services skipped
+	Offset int `json:"offset"`
+
+	// Returned Actual number of services returned in this response
+	Returned int `json:"returned"`
+
+	// TotalResults Total number of services matching the query
+	TotalResults int `json:"total_results"`
+}
+
 // ScheduleLocation defines model for ScheduleLocation.
 type ScheduleLocation struct {
 	// ActualArrival Actual arrival time from TRUST feed (if available)
@@ -85,6 +100,12 @@ type ServiceQueryRequest struct {
 	// Headcode Filter by headcode
 	Headcode *string `json:"headcode,omitempty"`
 
+	// Limit Maximum number of services to return
+	Limit *int `json:"limit,omitempty"`
+
+	// Offset Number of services to skip (0-indexed)
+	Offset *int `json:"offset,omitempty"`
+
 	// OperatorCode Filter by operator/TOC code
 	OperatorCode *string `json:"operator_code,omitempty"`
 
@@ -98,6 +119,12 @@ type ServiceQueryRequest struct {
 		// TimeTo Latest time at this location
 		TimeTo *time.Time `json:"time_to,omitempty"`
 	} `json:"passes_through,omitempty"`
+}
+
+// ServiceQueryResponse defines model for ServiceQueryResponse.
+type ServiceQueryResponse struct {
+	Pagination PaginationInfo    `json:"pagination"`
+	Services   []ServiceResponse `json:"services"`
 }
 
 // ServiceResponse defines model for ServiceResponse.

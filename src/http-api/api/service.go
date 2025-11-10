@@ -8,6 +8,11 @@ import (
 	"github.com/jack-barr3tt/gbr-engine/src/common/data"
 )
 
+const (
+	MaxLimit  = 100
+	MaxOffset = 1000
+)
+
 func (s *APIServer) QueryServices(c *fiber.Ctx) error {
 	var req ServiceQueryRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -25,6 +30,28 @@ func (s *APIServer) QueryServices(c *fiber.Ctx) error {
 
 	if req.OperatorCode != nil {
 		filters.OperatorCode = req.OperatorCode
+	}
+
+	filters.Offset = 0
+	if req.Offset != nil && *req.Offset >= 0 {
+		if *req.Offset > MaxOffset {
+			return c.Status(http.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: "Offset exceeds maximum allowed value of 1000",
+			})
+		}
+		filters.Offset = *req.Offset
+	}
+
+	filters.Limit = 50 // Default limit
+	if req.Limit != nil && *req.Limit > 0 {
+		if *req.Limit > MaxLimit {
+			return c.Status(http.StatusBadRequest).JSON(ErrorResponse{
+				Error:   "Bad Request",
+				Message: "Limit exceeds maximum allowed value of 100",
+			})
+		}
+		filters.Limit = *req.Limit
 	}
 
 	if req.PassesThrough != nil && len(*req.PassesThrough) > 0 {
@@ -54,7 +81,7 @@ func (s *APIServer) QueryServices(c *fiber.Ctx) error {
 		}
 	}
 
-	services, err := s.Data.GetServicesWithFilters(filters)
+	result, err := s.Data.GetServicesWithFilters(filters)
 	if err != nil {
 		errStr := err.Error()
 		return c.Status(http.StatusInternalServerError).JSON(ErrorResponse{
@@ -64,6 +91,7 @@ func (s *APIServer) QueryServices(c *fiber.Ctx) error {
 		})
 	}
 
+	services := result.Services
 	if services == nil {
 		services = []ServiceResponse{}
 	}
@@ -75,5 +103,16 @@ func (s *APIServer) QueryServices(c *fiber.Ctx) error {
 	}
 	s.Data.AddRealtimeData(services, realtimeDate)
 
-	return c.JSON(services)
+	// Calculate pagination info
+	response := ServiceQueryResponse{
+		Services: services,
+		Pagination: PaginationInfo{
+			Offset:       filters.Offset,
+			Limit:        filters.Limit,
+			Returned:     len(services),
+			TotalResults: result.TotalResults,
+		},
+	}
+
+	return c.JSON(response)
 }

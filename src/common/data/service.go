@@ -18,12 +18,19 @@ type ServiceFilters struct {
 	Headcode      *string
 	OperatorCode  *string
 	PassesThrough []LocationFilter
+	Offset        int
+	Limit         int
 }
 
 type LocationFilter struct {
 	Stanox   string
 	TimeFrom *time.Time
 	TimeTo   *time.Time
+}
+
+type ServiceQueryResult struct {
+	Services     []api_types.ServiceResponse
+	TotalResults int
 }
 
 func (dc *DataClient) buildServiceFilter(filters ServiceFilters) (string, []interface{}) {
@@ -101,7 +108,7 @@ func (dc *DataClient) buildServiceFilter(filters ServiceFilters) (string, []inte
 	return whereClause, args
 }
 
-func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) ([]api_types.ServiceResponse, error) {
+func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQueryResult, error) {
 	filter, args := dc.buildServiceFilter(filters)
 
 	query := fmt.Sprintf(`
@@ -218,7 +225,116 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) ([]api_type
 		}
 	}
 
-	return services, nil
+	// Sort services based on specified criteria
+	dc.sortServices(services, filters)
+
+	// Calculate total results before pagination
+	totalResults := len(services)
+
+	// Apply offset and limit
+	if filters.Limit > 0 {
+		startIdx := filters.Offset
+		
+		// Prevent integer overflow and out of bounds access
+		if startIdx >= len(services) {
+			services = []api_types.ServiceResponse{}
+		} else {
+			// Calculate endIdx safely to prevent overflow
+			endIdx := startIdx + filters.Limit
+			if endIdx < startIdx || endIdx > len(services) {
+				// Overflow occurred or exceeds length
+				endIdx = len(services)
+			}
+			services = services[startIdx:endIdx]
+		}
+	}
+
+	return &ServiceQueryResult{
+		Services:     services,
+		TotalResults: totalResults,
+	}, nil
+}
+
+// sortServices sorts services based on the specified criteria
+func (dc *DataClient) sortServices(services []api_types.ServiceResponse, filters ServiceFilters) {
+	if len(filters.PassesThrough) > 0 {
+		// Sort by time at first specified pass location
+		firstStanox := filters.PassesThrough[0].Stanox
+		
+		// Sort services
+		for i := 0; i < len(services); i++ {
+			for j := i + 1; j < len(services); j++ {
+				timeI := dc.getTimeAtLocation(services[i], firstStanox)
+				timeJ := dc.getTimeAtLocation(services[j], firstStanox)
+				
+				if timeI != "" && timeJ != "" {
+					if timeI > timeJ {
+						services[i], services[j] = services[j], services[i]
+					}
+				} else if timeJ != "" {
+					// Services with times should come before services without
+					services[i], services[j] = services[j], services[i]
+				}
+			}
+		}
+	} else {
+		// Sort by departure time at origin
+		for i := 0; i < len(services); i++ {
+			for j := i + 1; j < len(services); j++ {
+				timeI := dc.getOriginDepartureTime(services[i])
+				timeJ := dc.getOriginDepartureTime(services[j])
+				
+				if timeI != "" && timeJ != "" {
+					if timeI > timeJ {
+						services[i], services[j] = services[j], services[i]
+					}
+				} else if timeJ != "" {
+					services[i], services[j] = services[j], services[i]
+				}
+			}
+		}
+	}
+}
+
+// getTimeAtLocation returns the time (departure or arrival) at a specific location
+func (dc *DataClient) getTimeAtLocation(service api_types.ServiceResponse, stanox string) string {
+	for _, loc := range service.Locations {
+		if loc.Location.Stanox == stanox {
+			if loc.Departure != nil && *loc.Departure != "" {
+				return *loc.Departure
+			}
+			if loc.Arrival != nil && *loc.Arrival != "" {
+				return *loc.Arrival
+			}
+		}
+	}
+	return ""
+}
+
+// getOriginDepartureTime returns the departure time at the origin (first location)
+func (dc *DataClient) getOriginDepartureTime(service api_types.ServiceResponse) string {
+	if len(service.Locations) == 0 {
+		return ""
+	}
+	
+	// Find the first location by location_order
+	var firstLoc *api_types.ScheduleLocation
+	for i := range service.Locations {
+		if firstLoc == nil || service.Locations[i].LocationOrder < firstLoc.LocationOrder {
+			firstLoc = &service.Locations[i]
+		}
+	}
+	
+	if firstLoc != nil {
+		if firstLoc.Departure != nil && *firstLoc.Departure != "" {
+			return *firstLoc.Departure
+		}
+		if firstLoc.Arrival != nil && *firstLoc.Arrival != "" {
+			return *firstLoc.Arrival
+		}
+	}
+	
+	return ""
 }
 
 // fetchScheduleLocations fetches all schedule locations for the given schedule IDs

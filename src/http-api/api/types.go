@@ -4,13 +4,15 @@ package api
 import api_types "github.com/jack-barr3tt/gbr-engine/src/common/api-types"
 
 type (
-	ErrorResponse       = api_types.ErrorResponse
-	HealthResponse      = api_types.HealthResponse
-	Location            = api_types.Location
-	NotFoundResponse    = api_types.NotFoundResponse
-	Operator            = api_types.Operator
-	ScheduleLocation    = api_types.ScheduleLocation
-	ServiceResponse     = api_types.ServiceResponse
-	ServiceQueryRequest = api_types.ServiceQueryRequest
-	LocationFilter      = api_types.LocationFilter
+	ErrorResponse        = api_types.ErrorResponse
+	HealthResponse       = api_types.HealthResponse
+	Location             = api_types.Location
+	NotFoundResponse     = api_types.NotFoundResponse
+	Operator             = api_types.Operator
+	ScheduleLocation     = api_types.ScheduleLocation
+	ServiceResponse      = api_types.ServiceResponse
+	ServiceQueryRequest  = api_types.ServiceQueryRequest
+	ServiceQueryResponse = api_types.ServiceQueryResponse
+	PaginationInfo       = api_types.PaginationInfo
+	LocationFilter       = api_types.LocationFilter
 )
