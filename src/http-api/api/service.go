@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 	"time"
 
@@ -115,4 +116,58 @@ func (s *APIServer) QueryServices(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(response)
+}
+
+func (s *APIServer) GetService(c *fiber.Ctx, params GetServiceParams) error {
+	uid := params.Uid
+	id := params.Id
+	dateParam := params.Date
+
+	// Validate that at least one identifier is provided
+	if uid == nil && id == nil {
+		return c.Status(http.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Must provide either 'uid' or 'id' parameter",
+		})
+	}
+
+	// If ID is provided, date is required
+	if id != nil && dateParam == nil {
+		return c.Status(http.StatusBadRequest).JSON(ErrorResponse{
+			Error:   "Bad Request",
+			Message: "When using 'id' parameter, 'date' parameter is required",
+		})
+	}
+
+	// Convert date if provided
+	var date *time.Time
+	if dateParam != nil {
+		date = &dateParam.Time
+	}
+
+	var service *ServiceResponse
+	var err error
+
+	if uid != nil {
+		service, err = s.Data.GetServiceByUID(*uid, date)
+	} else {
+		service, err = s.Data.GetServiceByID(*id, *date)
+	}
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.Status(http.StatusNotFound).JSON(NotFoundResponse{
+				Error: "Service not found",
+			})
+		}
+
+		errStr := err.Error()
+		return c.Status(http.StatusInternalServerError).JSON(ErrorResponse{
+			Error:   "Database error",
+			Message: "Failed to retrieve service",
+			Stack:   &errStr,
+		})
+	}
+
+	return c.JSON(service)
 }

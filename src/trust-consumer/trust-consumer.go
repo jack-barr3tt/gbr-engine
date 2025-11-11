@@ -73,8 +73,19 @@ func processActivation(ctx context.Context, rdb *redis.Client, logger *zap.Sugar
 	trainID := strings.TrimSpace(trust.TrainID)
 	trainUID := strings.TrimSpace(trust.TrainUID)
 
+	activationData := map[string]string{
+		"train_uid":       trainUID,
+		"train_id":        trainID,
+		"activation_time": trust.ActualTimestamp,
+	}
+
+	jsonData, err := json.Marshal(activationData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal activation data: %w", err)
+	}
+
 	key := utils.BuildActivationKey(trainID)
-	err := rdb.Set(ctx, key, trainUID, 48*time.Hour).Err()
+	err = rdb.Set(ctx, key, jsonData, 48*time.Hour).Err()
 	if err != nil {
 		return fmt.Errorf("failed to store activation: %w", err)
 	}
@@ -87,17 +98,30 @@ func processMovement(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, l
 	trainID := strings.TrimSpace(trust.TrainID)
 
 	activationKey := utils.BuildActivationKey(trainID)
-	trainUID, err := rdb.Get(ctx, activationKey).Result()
+	activationData, err := rdb.Get(ctx, activationKey).Result()
 	if err != nil {
 		logger.Debugw("no activation found for train", "train_id", trainID)
 		return nil
 	}
 
-	trainUID = strings.TrimSpace(trainUID)
+	var activation map[string]string
+	if err := json.Unmarshal([]byte(activationData), &activation); err != nil {
+		trainUID := strings.TrimSpace(activationData)
+		activation = map[string]string{
+			"train_uid": trainUID,
+		}
+	}
+
+	trainUID := strings.TrimSpace(activation["train_uid"])
 
 	journey, err := utils.LoadTrainJourney(ctx, db, rdb, trainUID, runDate)
 	if err != nil {
 		return nil
+	}
+	
+	journey.TrainID = trainID
+	if activationTime, ok := activation["activation_time"]; ok {
+		journey.ActivationTime = activationTime
 	}
 
 	merged := utils.MergeTrustEvent(&journey, trust)

@@ -9,7 +9,9 @@ type Stop struct {
 }
 
 type TrainJourney struct {
-	UID     string `json:"uid"`
-	RunDate string `json:"run_date"`
-	Stops   []Stop `json:"stops"`
+	UID            string `json:"uid"`
+	RunDate        string `json:"run_date"`
+	TrainID        string `json:"train_id,omitempty"`
+	ActivationTime string `json:"activation_time,omitempty"`
+	Stops          []Stop `json:"stops"`
 }

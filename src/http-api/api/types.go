@@ -1,7 +1,9 @@
 package api
 
 // Type aliases to expose common types in the api package
-import api_types "github.com/jack-barr3tt/gbr-engine/src/common/api-types"
+import (
+	api_types "github.com/jack-barr3tt/gbr-engine/src/common/api-types"
+)
 
 type (
 	ErrorResponse        = api_types.ErrorResponse
@@ -15,4 +17,5 @@ type (
 	ServiceQueryResponse = api_types.ServiceQueryResponse
 	PaginationInfo       = api_types.PaginationInfo
 	LocationFilter       = api_types.LocationFilter
+	GetServiceParams     = api_types.GetServiceParams
 )

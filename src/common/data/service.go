@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -108,6 +109,70 @@ func (dc *DataClient) buildServiceFilter(filters ServiceFilters) (string, []inte
 	return whereClause, args
 }
 
+func scanServiceRow(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*api_types.ServiceResponse, error) {
+	var service api_types.ServiceResponse
+	var scheduleStartDate, scheduleEndDate time.Time
+	var scheduleDaysRuns string
+	var trainCategory, trainStatus, atocCode, tocName sql.NullString
+
+	err := scanner.Scan(
+		&service.Id,
+		&service.TrainUid,
+		&service.SignallingId,
+		&service.Headcode,
+		&trainCategory,
+		&scheduleStartDate,
+		&scheduleEndDate,
+		&scheduleDaysRuns,
+		&trainStatus,
+		&atocCode,
+		&tocName,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if trainCategory.Valid {
+		service.TrainCategory = &trainCategory.String
+	}
+	if trainStatus.Valid {
+		service.TrainStatus = &trainStatus.String
+	}
+
+	startDate := openapi_types.Date{Time: scheduleStartDate}
+	endDate := openapi_types.Date{Time: scheduleEndDate}
+	service.ScheduleStartDate = &startDate
+	service.ScheduleEndDate = &endDate
+	service.ScheduleDaysRuns = &scheduleDaysRuns
+
+	if atocCode.Valid && tocName.Valid {
+		service.Operator = &api_types.Operator{
+			Code: atocCode.String,
+			Name: tocName.String,
+		}
+	}
+
+	return &service, nil
+}
+
+func (dc *DataClient) enrichServiceWithLocationsAndRealtime(service *api_types.ServiceResponse, date *time.Time) error {
+	allStops, err := dc.fetchScheduleLocations(service.Id)
+	if err != nil {
+		return fmt.Errorf("failed to fetch schedule locations: %w", err)
+	}
+	service.Locations = allStops[service.Id]
+
+	if date != nil {
+		services := []api_types.ServiceResponse{*service}
+		dc.AddRealtimeData(services, *date)
+		*service = services[0]
+	}
+
+	return nil
+}
+
 func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQueryResult, error) {
 	filter, args := dc.buildServiceFilter(filters)
 
@@ -133,50 +198,13 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 
 	for rows.Next() {
 		rowCount++
-		var service api_types.ServiceResponse
-		var scheduleStartDate, scheduleEndDate time.Time
-		var scheduleDaysRuns string
-		var trainCategory, trainStatus, atocCode, tocName sql.NullString
-
-		err := rows.Scan(
-			&service.Id,
-			&service.TrainUid,
-			&service.SignallingId,
-			&service.Headcode,
-			&trainCategory,
-			&scheduleStartDate,
-			&scheduleEndDate,
-			&scheduleDaysRuns,
-			&trainStatus,
-			&atocCode,
-			&tocName,
-		)
+		service, err := scanServiceRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan service row: %w", err)
 		}
 
-		if trainCategory.Valid {
-			service.TrainCategory = &trainCategory.String
-		}
-		if trainStatus.Valid {
-			service.TrainStatus = &trainStatus.String
-		}
-
-		startDate := openapi_types.Date{Time: scheduleStartDate}
-		endDate := openapi_types.Date{Time: scheduleEndDate}
-		service.ScheduleStartDate = &startDate
-		service.ScheduleEndDate = &endDate
-		service.ScheduleDaysRuns = &scheduleDaysRuns
-
-		if atocCode.Valid && tocName.Valid {
-			service.Operator = &api_types.Operator{
-				Code: atocCode.String,
-				Name: tocName.String,
-			}
-		}
-
 		scheduleIDs = append(scheduleIDs, service.Id)
-		services = append(services, service)
+		services = append(services, *service)
 	}
 
 	if err = rows.Err(); err != nil {
@@ -234,7 +262,7 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 	// Apply offset and limit
 	if filters.Limit > 0 {
 		startIdx := filters.Offset
-		
+
 		// Prevent integer overflow and out of bounds access
 		if startIdx >= len(services) {
 			services = []api_types.ServiceResponse{}
@@ -255,18 +283,77 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 	}, nil
 }
 
+func (dc *DataClient) GetServiceByUID(uid string, date *time.Time) (*api_types.ServiceResponse, error) {
+	query := `
+		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
+			   s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
+			   s.train_status, s.atoc_code, toc.name
+		FROM schedule s
+		JOIN reference_toc toc ON s.atoc_code = toc.code
+		WHERE s.train_uid = $1
+	`
+
+	args := []interface{}{uid}
+
+	if date != nil {
+		query += " AND s.schedule_start_date <= $2 AND s.schedule_end_date >= $2"
+		args = append(args, *date)
+	}
+
+	query += " ORDER BY s.schedule_start_date DESC LIMIT 1"
+
+	service, err := scanServiceRow(dc.pg.QueryRow(context.Background(), query, args...))
+	if err != nil {
+		return nil, err
+	}
+
+	if err := dc.enrichServiceWithLocationsAndRealtime(service, date); err != nil {
+		return nil, err
+	}
+
+	return service, nil
+}
+
+func (dc *DataClient) GetServiceByID(id int, date time.Time) (*api_types.ServiceResponse, error) {
+	query := `
+		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
+			   s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
+			   s.train_status, s.atoc_code, toc.name
+		FROM schedule s
+		JOIN reference_toc toc ON s.atoc_code = toc.code
+		WHERE s.id = $1
+	`
+
+	service, err := scanServiceRow(dc.pg.QueryRow(context.Background(), query, id))
+	if err != nil {
+		return nil, err
+	}
+
+	if service.ScheduleDaysRuns != nil && service.ScheduleStartDate != nil && service.ScheduleEndDate != nil {
+		if !isScheduleValidForDate(*service.ScheduleDaysRuns, service.ScheduleStartDate.Time, service.ScheduleEndDate.Time, date) {
+			return nil, sql.ErrNoRows
+		}
+	}
+
+	if err := dc.enrichServiceWithLocationsAndRealtime(service, &date); err != nil {
+		return nil, err
+	}
+
+	return service, nil
+}
+
 // sortServices sorts services based on the specified criteria
 func (dc *DataClient) sortServices(services []api_types.ServiceResponse, filters ServiceFilters) {
 	if len(filters.PassesThrough) > 0 {
 		// Sort by time at first specified pass location
 		firstStanox := filters.PassesThrough[0].Stanox
-		
+
 		// Sort services
 		for i := 0; i < len(services); i++ {
 			for j := i + 1; j < len(services); j++ {
 				timeI := dc.getTimeAtLocation(services[i], firstStanox)
 				timeJ := dc.getTimeAtLocation(services[j], firstStanox)
-				
+
 				if timeI != "" && timeJ != "" {
 					if timeI > timeJ {
 						services[i], services[j] = services[j], services[i]
@@ -283,7 +370,7 @@ func (dc *DataClient) sortServices(services []api_types.ServiceResponse, filters
 			for j := i + 1; j < len(services); j++ {
 				timeI := dc.getOriginDepartureTime(services[i])
 				timeJ := dc.getOriginDepartureTime(services[j])
-				
+
 				if timeI != "" && timeJ != "" {
 					if timeI > timeJ {
 						services[i], services[j] = services[j], services[i]
@@ -316,7 +403,7 @@ func (dc *DataClient) getOriginDepartureTime(service api_types.ServiceResponse) 
 	if len(service.Locations) == 0 {
 		return ""
 	}
-	
+
 	// Find the first location by location_order
 	var firstLoc *api_types.ScheduleLocation
 	for i := range service.Locations {
@@ -324,7 +411,7 @@ func (dc *DataClient) getOriginDepartureTime(service api_types.ServiceResponse) 
 			firstLoc = &service.Locations[i]
 		}
 	}
-	
+
 	if firstLoc != nil {
 		if firstLoc.Departure != nil && *firstLoc.Departure != "" {
 			return *firstLoc.Departure
@@ -333,7 +420,7 @@ func (dc *DataClient) getOriginDepartureTime(service api_types.ServiceResponse) 
 			return *firstLoc.Arrival
 		}
 	}
-	
+
 	return ""
 }
 
@@ -651,6 +738,51 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 		journey, hasJourney := journeys[trainUid]
 		if !hasJourney {
 			continue
+		}
+
+		var activationTrainID string
+		var activationTime string
+
+		if journey.TrainID != "" {
+			activationTrainID = journey.TrainID
+			if journey.ActivationTime == "" {
+				activationKey := utils.BuildActivationKey(journey.TrainID)
+				activationData, err := dc.rdb.Get(context.Background(), activationKey).Result()
+				if err == nil {
+					var activation map[string]string
+					if json.Unmarshal([]byte(activationData), &activation) == nil {
+						if aTime, ok := activation["activation_time"]; ok {
+							activationTime = aTime
+						}
+					}
+				}
+			} else {
+				activationTime = journey.ActivationTime
+			}
+		} else {
+			ctx := context.Background()
+			iter := dc.rdb.Scan(ctx, 0, "activation:*", 100).Iterator()
+			for iter.Next(ctx) {
+				key := iter.Val()
+				activationData, err := dc.rdb.Get(ctx, key).Result()
+				if err == nil {
+					var activation map[string]string
+					if json.Unmarshal([]byte(activationData), &activation) == nil {
+						if activation["train_uid"] == trainUid {
+							activationTrainID = activation["train_id"]
+							activationTime = activation["activation_time"]
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if activationTrainID != "" {
+			services[i].TrustId = &activationTrainID
+		}
+		if activationTime != "" {
+			services[i].ActivationTime = &activationTime
 		}
 
 		stanoxToStop := make(map[string]types.Stop)

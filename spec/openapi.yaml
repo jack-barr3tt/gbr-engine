@@ -115,6 +115,56 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /service:
+    get:
+      summary: Get a single service
+      description: Returns a single service by either train UID or schedule ID + date
+      operationId: getService
+      parameters:
+        - name: uid
+          in: query
+          description: Train UID to search for
+          schema:
+            type: string
+          example: "Y81836"
+        - name: id
+          in: query
+          description: Schedule ID to search for (must be used with date)
+          schema:
+            type: integer
+          example: 107343
+        - name: date
+          in: query
+          description: Date to filter by (required when using id, optional with uid)
+          schema:
+            type: string
+            format: date
+          example: "2025-10-11"
+      responses:
+        "200":
+          description: Service found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Service not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotFoundResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     ServiceQueryRequest:
@@ -259,6 +309,14 @@ components:
         train_status:
           type: string
           example: "P"
+        trust_id:
+          type: string
+          description: "TRUST train ID (if activated)"
+          example: "123A45BC67"
+        activation_time:
+          type: string
+          description: "TRUST activation timestamp (if activated)"
+          example: "1699000000000"
         operator:
           $ref: "#/components/schemas/Operator"
         locations:
