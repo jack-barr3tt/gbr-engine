@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -69,36 +70,35 @@ func (dc *DataClient) buildServiceFilter(filters ServiceFilters) (string, []inte
 			}
 		}
 		conditions = append(conditions, fmt.Sprintf("s.schedule_start_date <= $%d", argIndex))
-		args = append(args, maxDate)
+		args = append(args, maxDate.Format("2006-01-02"))
 		argIndex++
 		conditions = append(conditions, fmt.Sprintf("s.schedule_end_date >= $%d", argIndex))
-		args = append(args, minDate)
+		args = append(args, minDate.Format("2006-01-02"))
 		argIndex++
 	}
 
 	for _, locFilter := range filters.PassesThrough {
-		condParts := []string{fmt.Sprintf("EXISTS (SELECT 1 FROM schedule_location sl WHERE sl.schedule_id = s.id AND sl.tiploc_code IN (SELECT t.tiploc_code FROM tiploc t WHERE t.stanox = $%d)", argIndex)}
+		existsClause := fmt.Sprintf("EXISTS (SELECT 1 FROM schedule_location sl WHERE sl.schedule_id = s.id AND sl.tiploc_code IN (SELECT tiploc_code FROM tiploc WHERE stanox = $%d))", argIndex)
 		args = append(args, locFilter.Stanox)
 		argIndex++
 
 		if locFilter.TimeFrom != nil && locFilter.TimeTo != nil {
 			timeFrom := locFilter.TimeFrom.Format("15:04:05")
 			timeTo := locFilter.TimeTo.Format("15:04:05")
-
-			condParts = append(condParts, fmt.Sprintf("((sl.arrival::time BETWEEN $%d AND $%d) OR (sl.departure::time BETWEEN $%d AND $%d))", argIndex, argIndex+1, argIndex, argIndex+1))
+			existsClause = fmt.Sprintf("EXISTS (SELECT 1 FROM schedule_location sl WHERE sl.schedule_id = s.id AND sl.tiploc_code IN (SELECT tiploc_code FROM tiploc WHERE stanox = $%d) AND (sl.arrival::time BETWEEN $%d AND $%d OR sl.departure::time BETWEEN $%d AND $%d))", argIndex-1, argIndex, argIndex+1, argIndex, argIndex+1)
 			args = append(args, timeFrom, timeTo)
 			argIndex += 2
 		} else if locFilter.TimeFrom != nil {
-			condParts = append(condParts, fmt.Sprintf("((sl.arrival::time >= $%d) OR (sl.departure::time >= $%d))", argIndex, argIndex))
+			existsClause = fmt.Sprintf("EXISTS (SELECT 1 FROM schedule_location sl WHERE sl.schedule_id = s.id AND sl.tiploc_code IN (SELECT tiploc_code FROM tiploc WHERE stanox = $%d) AND (sl.arrival::time >= $%d OR sl.departure::time >= $%d))", argIndex-1, argIndex, argIndex)
 			args = append(args, locFilter.TimeFrom.Format("15:04:05"))
 			argIndex++
 		} else if locFilter.TimeTo != nil {
-			condParts = append(condParts, fmt.Sprintf("((sl.arrival::time <= $%d) OR (sl.departure::time <= $%d))", argIndex, argIndex))
+			existsClause = fmt.Sprintf("EXISTS (SELECT 1 FROM schedule_location sl WHERE sl.schedule_id = s.id AND sl.tiploc_code IN (SELECT tiploc_code FROM tiploc WHERE stanox = $%d) AND (sl.arrival::time <= $%d OR sl.departure::time <= $%d))", argIndex-1, argIndex, argIndex)
 			args = append(args, locFilter.TimeTo.Format("15:04:05"))
 			argIndex++
 		}
 
-		conditions = append(conditions, strings.Join(condParts, " AND ")+")")
+		conditions = append(conditions, existsClause)
 	}
 
 	whereClause := ""
@@ -175,7 +175,20 @@ func (dc *DataClient) enrichServiceWithLocationsAndRealtime(service *api_types.S
 
 func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQueryResult, error) {
 	filter, args := dc.buildServiceFilter(filters)
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT s.id)
+		FROM schedule s
+		JOIN reference_toc toc ON s.atoc_code = toc.code
+		%s
+	`, filter)
 
+	var totalResults int
+	err := dc.pg.QueryRow(context.Background(), countQuery, args...).Scan(&totalResults)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count services: %w", err)
+	}
+
+	mainQueryArgs := append([]interface{}{}, args...)
 	query := fmt.Sprintf(`
 		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
 			   s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
@@ -183,9 +196,13 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 		FROM schedule s
 		JOIN reference_toc toc ON s.atoc_code = toc.code
 		%s
-	`, filter)
+		ORDER BY s.schedule_start_date ASC, s.signalling_id ASC
+		LIMIT $%d OFFSET $%d
+	`, filter, len(mainQueryArgs)+1, len(mainQueryArgs)+2)
 
-	rows, err := dc.pg.Query(context.Background(), query, args...)
+	mainQueryArgs = append(mainQueryArgs, filters.Limit, filters.Offset)
+
+	rows, err := dc.pg.Query(context.Background(), query, mainQueryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute service query: %w", err)
 	}
@@ -211,69 +228,16 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 		return nil, fmt.Errorf("error iterating service rows: %w", err)
 	}
 
-	// Fetch all stops for all services
 	if len(scheduleIDs) > 0 {
 		allStops, err := dc.fetchScheduleLocations(scheduleIDs...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch schedule locations: %w", err)
 		}
 
+		totalLocations := 0
 		for i := range services {
 			services[i].Locations = allStops[services[i].Id]
-		}
-	}
-
-	if len(filters.PassesThrough) > 0 {
-		var earliestDate time.Time
-		for _, locFilter := range filters.PassesThrough {
-			if locFilter.TimeFrom != nil {
-				checkDate := locFilter.TimeFrom.Truncate(24 * time.Hour)
-				if earliestDate.IsZero() || checkDate.Before(earliestDate) {
-					earliestDate = checkDate
-				}
-			}
-		}
-
-		if !earliestDate.IsZero() {
-			validServices := make([]api_types.ServiceResponse, 0, len(services))
-			for _, service := range services {
-				if service.ScheduleDaysRuns == nil || service.ScheduleStartDate == nil || service.ScheduleEndDate == nil {
-					continue
-				}
-
-				if !isScheduleValidForDate(*service.ScheduleDaysRuns, service.ScheduleStartDate.Time, service.ScheduleEndDate.Time, earliestDate) {
-					continue
-				}
-
-				if matchesLocationFilters(service, filters.PassesThrough, earliestDate) {
-					validServices = append(validServices, service)
-				}
-			}
-			services = validServices
-		}
-	}
-
-	// Sort services based on specified criteria
-	dc.sortServices(services, filters)
-
-	// Calculate total results before pagination
-	totalResults := len(services)
-
-	// Apply offset and limit
-	if filters.Limit > 0 {
-		startIdx := filters.Offset
-
-		// Prevent integer overflow and out of bounds access
-		if startIdx >= len(services) {
-			services = []api_types.ServiceResponse{}
-		} else {
-			// Calculate endIdx safely to prevent overflow
-			endIdx := startIdx + filters.Limit
-			if endIdx < startIdx || endIdx > len(services) {
-				// Overflow occurred or exceeds length
-				endIdx = len(services)
-			}
-			services = services[startIdx:endIdx]
+			totalLocations += len(services[i].Locations)
 		}
 	}
 
@@ -349,37 +313,34 @@ func (dc *DataClient) sortServices(services []api_types.ServiceResponse, filters
 		firstStanox := filters.PassesThrough[0].Stanox
 
 		// Sort services
-		for i := 0; i < len(services); i++ {
-			for j := i + 1; j < len(services); j++ {
-				timeI := dc.getTimeAtLocation(services[i], firstStanox)
-				timeJ := dc.getTimeAtLocation(services[j], firstStanox)
+		sort.Slice(services, func(i, j int) bool {
+			timeI := dc.getTimeAtLocation(services[i], firstStanox)
+			timeJ := dc.getTimeAtLocation(services[j], firstStanox)
 
-				if timeI != "" && timeJ != "" {
-					if timeI > timeJ {
-						services[i], services[j] = services[j], services[i]
-					}
-				} else if timeJ != "" {
-					// Services with times should come before services without
-					services[i], services[j] = services[j], services[i]
-				}
+			if timeI == "" && timeJ != "" {
+				return false
 			}
-		}
+			if timeI != "" && timeJ == "" {
+				return true
+			}
+
+			return timeI < timeJ
+		})
 	} else {
 		// Sort by departure time at origin
-		for i := 0; i < len(services); i++ {
-			for j := i + 1; j < len(services); j++ {
-				timeI := dc.getOriginDepartureTime(services[i])
-				timeJ := dc.getOriginDepartureTime(services[j])
+		sort.Slice(services, func(i, j int) bool {
+			timeI := dc.getOriginDepartureTime(services[i])
+			timeJ := dc.getOriginDepartureTime(services[j])
 
-				if timeI != "" && timeJ != "" {
-					if timeI > timeJ {
-						services[i], services[j] = services[j], services[i]
-					}
-				} else if timeJ != "" {
-					services[i], services[j] = services[j], services[i]
-				}
+			if timeI == "" && timeJ != "" {
+				return false
 			}
-		}
+			if timeI != "" && timeJ == "" {
+				return true
+			}
+
+			return timeI < timeJ
+		})
 	}
 }
 
@@ -404,21 +365,12 @@ func (dc *DataClient) getOriginDepartureTime(service api_types.ServiceResponse) 
 		return ""
 	}
 
-	// Find the first location by location_order
-	var firstLoc *api_types.ScheduleLocation
-	for i := range service.Locations {
-		if firstLoc == nil || service.Locations[i].LocationOrder < firstLoc.LocationOrder {
-			firstLoc = &service.Locations[i]
-		}
+	firstLoc := &service.Locations[0]
+	if firstLoc.Departure != nil && *firstLoc.Departure != "" {
+		return *firstLoc.Departure
 	}
-
-	if firstLoc != nil {
-		if firstLoc.Departure != nil && *firstLoc.Departure != "" {
-			return *firstLoc.Departure
-		}
-		if firstLoc.Arrival != nil && *firstLoc.Arrival != "" {
-			return *firstLoc.Arrival
-		}
+	if firstLoc.Arrival != nil && *firstLoc.Arrival != "" {
+		return *firstLoc.Arrival
 	}
 
 	return ""
@@ -445,8 +397,12 @@ func (dc *DataClient) fetchScheduleLocations(scheduleIDs ...int) (map[int][]api_
 		return nil, err
 	}
 	defer rows.Close()
+	locationsBySchedule := make(map[int][]api_types.ScheduleLocation, len(scheduleIDs))
+	estimatedLocationsPerSchedule := 30
+	for _, schedID := range scheduleIDs {
+		locationsBySchedule[schedID] = make([]api_types.ScheduleLocation, 0, estimatedLocationsPerSchedule)
+	}
 
-	locationsBySchedule := make(map[int][]api_types.ScheduleLocation)
 	locationCount := 0
 
 	for rows.Next() {
@@ -575,7 +531,8 @@ func matchesLocationFilters(service api_types.ServiceResponse, filters []Locatio
 		locationsByStanox[loc.Location.Stanox] = append(locationsByStanox[loc.Location.Stanox], loc)
 	}
 
-	locationDates := make(map[int]time.Time)
+	locationTimes := make(map[int]time.Time, len(service.Locations))
+	locationDates := make(map[int]time.Time, len(service.Locations))
 	currentDate := baseDate
 	var prevTime time.Time
 
@@ -600,6 +557,7 @@ func matchesLocationFilters(service api_types.ServiceResponse, filters []Locatio
 		}
 
 		locationDates[loc.LocationOrder] = currentDate
+		locationTimes[loc.LocationOrder] = locTime
 		if !locTime.IsZero() {
 			prevTime = locTime
 		}
@@ -624,17 +582,7 @@ func matchesLocationFilters(service api_types.ServiceResponse, filters []Locatio
 					continue
 				}
 
-				var locTime time.Time
-				if loc.Arrival != nil && *loc.Arrival != "" {
-					parsed, _ := time.Parse("15:04:05", *loc.Arrival)
-					locTime = parsed
-				}
-				if loc.Departure != nil && *loc.Departure != "" {
-					parsed, _ := time.Parse("15:04:05", *loc.Departure)
-					if locTime.IsZero() || parsed.After(locTime) {
-						locTime = parsed
-					}
-				}
+				locTime := locationTimes[loc.LocationOrder]
 
 				if !locTime.IsZero() {
 					locTimeSeconds := locTime.Hour()*3600 + locTime.Minute()*60 + locTime.Second()
@@ -701,44 +649,52 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 		}(trainUID)
 	}
 	journeyWg.Wait()
-	tiplocs := make(map[string]bool)
-	for i := range services {
-		for j := range services[i].Locations {
-			for _, tiplocCode := range services[i].Locations[j].Location.TiplocCodes {
-				tiplocs[tiplocCode] = true
-			}
-		}
-	}
 
-	tiplocToStanox := make(map[string]string)
-	stanoxMutex := &sync.Mutex{}
-	stanoxWg := &sync.WaitGroup{}
-
-	stanoxSemaphore := make(chan struct{}, 100)
-
-	for tiploc := range tiplocs {
-		stanoxWg.Add(1)
-		go func(t string) {
-			defer stanoxWg.Done()
-			stanoxSemaphore <- struct{}{}
-			defer func() { <-stanoxSemaphore }()
-
-			stanox, err := dc.GetStanoxByTiploc(t)
-			if err == nil {
-				stanoxMutex.Lock()
-				tiplocToStanox[t] = stanox
-				stanoxMutex.Unlock()
-			}
-		}(tiploc)
-	}
-	stanoxWg.Wait()
-
+	servicesWithJourneys := make([]int, 0, len(journeys))
 	for i := range services {
 		trainUid := strings.TrimSpace(services[i].TrainUid)
-		journey, hasJourney := journeys[trainUid]
-		if !hasJourney {
-			continue
+		if _, hasJourney := journeys[trainUid]; hasJourney {
+			servicesWithJourneys = append(servicesWithJourneys, i)
 		}
+	}
+
+	tiplocs := make([]string, 0, 300) // Preallocate with estimated size
+	tiplocSet := make(map[string]bool)
+
+	for _, idx := range servicesWithJourneys {
+		for j := range services[idx].Locations {
+			for _, tiplocCode := range services[idx].Locations[j].Location.TiplocCodes {
+				if !tiplocSet[tiplocCode] {
+					tiplocSet[tiplocCode] = true
+					tiplocs = append(tiplocs, tiplocCode)
+				}
+			}
+		}
+	}
+
+	tiplocToStanox := make(map[string]string, len(tiplocs))
+
+	if len(tiplocs) > 0 {
+		rows, err := dc.pg.Query(context.Background(), `
+			SELECT tiploc_code, stanox
+			FROM tiploc
+			WHERE tiploc_code = ANY($1) AND stanox IS NOT NULL
+		`, tiplocs)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var tiplocCode, stanox string
+				if err := rows.Scan(&tiplocCode, &stanox); err == nil {
+					tiplocToStanox[tiplocCode] = stanox
+				}
+			}
+			rows.Close()
+		}
+	}
+
+	for _, idx := range servicesWithJourneys {
+		trainUid := strings.TrimSpace(services[idx].TrainUid)
+		journey := journeys[trainUid]
 
 		var activationTrainID string
 		var activationTime string
@@ -760,29 +716,22 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 				activationTime = journey.ActivationTime
 			}
 		} else {
-			ctx := context.Background()
-			iter := dc.rdb.Scan(ctx, 0, "activation:*", 100).Iterator()
-			for iter.Next(ctx) {
-				key := iter.Val()
-				activationData, err := dc.rdb.Get(ctx, key).Result()
-				if err == nil {
-					var activation map[string]string
-					if json.Unmarshal([]byte(activationData), &activation) == nil {
-						if activation["train_uid"] == trainUid {
-							activationTrainID = activation["train_id"]
-							activationTime = activation["activation_time"]
-							break
-						}
-					}
+			uidKey := fmt.Sprintf("activation:uid:%s", trainUid)
+			activationData, err := dc.rdb.Get(context.Background(), uidKey).Result()
+			if err == nil {
+				var activation map[string]string
+				if json.Unmarshal([]byte(activationData), &activation) == nil {
+					activationTrainID = activation["train_id"]
+					activationTime = activation["activation_time"]
 				}
 			}
 		}
 
 		if activationTrainID != "" {
-			services[i].TrustId = &activationTrainID
+			services[idx].TrustId = &activationTrainID
 		}
 		if activationTime != "" {
-			services[i].ActivationTime = &activationTime
+			services[idx].ActivationTime = &activationTime
 		}
 
 		stanoxToStop := make(map[string]types.Stop)
@@ -790,8 +739,8 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 			stanoxToStop[stop.Stanox] = stop
 		}
 
-		for j := range services[i].Locations {
-			location := &services[i].Locations[j]
+		for j := range services[idx].Locations {
+			location := &services[idx].Locations[j]
 
 			var stanox string
 			for _, tiplocCode := range location.Location.TiplocCodes {
@@ -811,21 +760,21 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 
 			if stop.ActualArr != "" {
 				formattedTime := utils.FormatActualTime(stop.ActualArr)
-				services[i].Locations[j].ActualArrival = &formattedTime
+				services[idx].Locations[j].ActualArrival = &formattedTime
 
 				if location.Arrival != nil && *location.Arrival != "" {
 					lateness := utils.CalculateLateness(*location.Arrival, stop.ActualArr)
-					services[i].Locations[j].ArrivalLateness = &lateness
+					services[idx].Locations[j].ArrivalLateness = &lateness
 				}
 			}
 
 			if stop.ActualDep != "" {
 				formattedTime := utils.FormatActualTime(stop.ActualDep)
-				services[i].Locations[j].ActualDeparture = &formattedTime
+				services[idx].Locations[j].ActualDeparture = &formattedTime
 
 				if location.Departure != nil && *location.Departure != "" {
 					lateness := utils.CalculateLateness(*location.Departure, stop.ActualDep)
-					services[i].Locations[j].DepartureLateness = &lateness
+					services[idx].Locations[j].DepartureLateness = &lateness
 				}
 			}
 		}

@@ -207,7 +207,7 @@ components:
           type: integer
           description: Maximum number of services to return
           minimum: 1
-          maximum: 100
+          maximum: 500
           default: 50
           example: 50
     LocationFilter:

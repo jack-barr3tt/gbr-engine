@@ -15,7 +15,7 @@ spec:
       containers:
         - name: redis
           image: redis:7-alpine
-          args: ["redis-server", "--save", "", "--appendonly", "yes"]
+          args: ["redis-server", "--save", "", "--appendonly", "no"]
           ports:
             - containerPort: 6379
           volumeMounts:

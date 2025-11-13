@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	MaxLimit  = 100
+	MaxLimit  = 500
 	MaxOffset = 1000
 )
 
