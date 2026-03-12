@@ -130,7 +130,10 @@ type ServiceQueryResponse struct {
 // ServiceResponse defines model for ServiceResponse.
 type ServiceResponse struct {
 	// ActivationTime TRUST activation timestamp (if activated)
-	ActivationTime    *string             `json:"activation_time,omitempty"`
+	ActivationTime *string `json:"activation_time,omitempty"`
+
+	// Cancelled Whether this service is cancelled by an STP cancellation record
+	Cancelled         *bool               `json:"cancelled,omitempty"`
 	Headcode          string              `json:"headcode"`
 	Id                int                 `json:"id"`
 	Locations         []ScheduleLocation  `json:"locations"`

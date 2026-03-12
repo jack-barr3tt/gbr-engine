@@ -7,7 +7,7 @@ COPY src/http-api/ ./src/http-api/
 COPY spec/ ./spec/
 WORKDIR /app/src/http-api
 RUN go mod download
-RUN go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
+RUN go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.1
 RUN go generate
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 

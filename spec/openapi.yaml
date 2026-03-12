@@ -319,6 +319,9 @@ components:
           example: "1699000000000"
         operator:
           $ref: "#/components/schemas/Operator"
+        cancelled:
+          type: boolean
+          description: "Whether this service is cancelled by an STP cancellation record"
         locations:
           type: array
           items:
