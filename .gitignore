@@ -1,2 +1,4 @@
 .env
 rendered-manifests.yaml
+build-errors.log
+main

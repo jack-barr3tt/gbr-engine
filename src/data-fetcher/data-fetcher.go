@@ -85,6 +85,16 @@ func main() {
 		log.Fatalw("failed to connect to Postgres", "error", err)
 	}
 
+	// Ensure reference_fetch has the toc row (schema may not have run the seed INSERT)
+	_, err = pg.Exec(context.Background(), `
+		INSERT INTO reference_fetch (key, last_fetched, max_age)
+		VALUES ('toc', '2000-01-01 00:00:00', '1 week')
+		ON CONFLICT (key) DO NOTHING`)
+	if err != nil {
+		log.Fatalw("failed to seed reference_fetch", "error", err)
+	}
+	log.Info("data-fetcher started, checking for stale reference data...")
+
 	for {
 		rows, err := pg.Query(context.Background(), "SELECT key FROM reference_fetch WHERE last_fetched + max_age < NOW()")
 		if err != nil {
@@ -92,8 +102,10 @@ func main() {
 		}
 
 		var key string
+		updated := false
 		for rows.Next() {
 			if err := rows.Scan(&key); err != nil {
+				rows.Close()
 				log.Fatalw("failed to scan key", "error", err)
 			}
 
@@ -106,6 +118,7 @@ func main() {
 				} else {
 					log.Info("TOC reference data updated successfully.")
 				}
+				updated = true
 			default:
 				log.Infow("unknown reference key", "key", key)
 			}
@@ -113,7 +126,9 @@ func main() {
 
 		rows.Close()
 
-		// Sleep for a while before checking again
+		if !updated {
+			log.Info("No stale reference data, sleeping 1h")
+		}
 		time.Sleep(1 * time.Hour)
 	}
 }
