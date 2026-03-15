@@ -2,3 +2,6 @@
 rendered-manifests.yaml
 build-errors.log
 main
+
+src/bplan-loader/data/*
+!src/bplan-loader/data/.gitkeep

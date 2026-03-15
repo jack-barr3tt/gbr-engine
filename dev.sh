@@ -27,8 +27,11 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
   exec tmux attach-session -t "$SESSION"
 fi
 
+psql -d postgres -c "CREATE DATABASE gbr_engine OWNER $POSTGRES_USER;" 2>/dev/null || true
 psql -d postgres -c "CREATE DATABASE gbr_engine_atlas_dev OWNER $POSTGRES_USER;" 2>/dev/null || true
 (cd "$ROOT" && atlas schema apply --env local)
+(cd "$ROOT" && atlas migrate hash --env local)
+(cd "$ROOT" && atlas migrate apply --env local --allow-dirty)
 
 SETUP="set -a && source \"$ENV_FILE\" && set +a && export GOWORK=off REDIS_ADDR=127.0.0.1:6379 MQ_HOST=127.0.0.1 MQ_PORT=5672 PORT=3000"
 
@@ -39,6 +42,7 @@ declare -a SERVICES=(
   "vstp-consumer:vstp"
   "data-fetcher:fetcher"
   "schedule-initializer:schedule"
+  "bplan-loader:bplan"
 )
 
 tmux new-session -d -s "$SESSION" -n "${SERVICES[0]##*:}"
@@ -52,5 +56,5 @@ for entry in "${SERVICES[@]:1}"; do
 done
 
 $NO_ATTACH && exit 0
-echo "Session $SESSION (api, queuer, trust, vstp, fetcher, schedule). Attaching..."
+echo "Session $SESSION (api, queuer, trust, vstp, fetcher, schedule, bplan). Attaching..."
 exec tmux attach-session -t "$SESSION"
