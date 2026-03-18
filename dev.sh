@@ -43,6 +43,7 @@ declare -a SERVICES=(
   "data-fetcher:fetcher"
   "schedule-initializer:schedule"
   "bplan-loader:bplan"
+  "gemini:gemini"
 )
 
 tmux new-session -d -s "$SESSION" -n "${SERVICES[0]##*:}"
@@ -56,5 +57,5 @@ for entry in "${SERVICES[@]:1}"; do
 done
 
 $NO_ATTACH && exit 0
-echo "Session $SESSION (api, queuer, trust, vstp, fetcher, schedule, bplan). Attaching..."
+echo "Session $SESSION (api, queuer, trust, vstp, fetcher, schedule, bplan, gemini). Attaching..."
 exec tmux attach-session -t "$SESSION"

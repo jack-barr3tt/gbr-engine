@@ -1,0 +1,1721 @@
+﻿<!-- edited with XMLSpy v2015 sp1 (http://www.altova.com) by Software Registry Team (Network Rail Infrastructure Ltd) -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="http://www.era.europa.eu/schemes/TAFTSI/5.3" xmlns:dcterms="http://purl.org/dc/terms/" targetNamespace="http://www.era.europa.eu/schemes/TAFTSI/5.3" elementFormDefault="qualified" attributeFormDefault="unqualified" version="7.0.0">
+	<xs:annotation>
+		<xs:documentation>
+This schema contains LINX XML (which also references xml elements from the GB taf_cat_Complete.xsd) for the following LINX Messages:
+
+MMESSAGE						MESSAGE NAME					MESSAGE DESCRIPTION
+Passenger Train Consist			PassengerTrainConsistMessage	This message is for passenger train allocation and consists.
+Freight Train Consist			FreightTrainConsistMessage		This message is for freight train consists.
+Crew Allocation					CrewAllocationMessage			This message is Train Centric whereby crew members are allocated to a train journey or train journey leg for a single train service.
+
+Change History
+=========
+Version 	mm/yy	Author      	Description
+----------	-------	------------	---------------------
+1.0     	08/15	(redacted under section 40 of the FOIA)    	Initial creation
+v02     	08/15	(redacted under section 40 of the FOIA)    	Edits to make a couple of the date elements xs:date rather than xs:dateTime
+v03     	08/15	(redacted under section 40 of the FOIA)    	Changes to remove extraneous fields in Passenger and Freight Train Consist Messages
+v04     	09/15	(redacted under section 40 of the FOIA)	Edits to xs:documentation and removal of unreferenced element types
+v05     	09/15	(redacted under section 40 of the FOIA)	Changed the xs:include value to "GB_TAF_TAP_TSI_complete.xsd" to pick up GB TAF TAP TSI Schema "5.3.1.GB"
+v06     	10/15	(redacted under section 40 of the FOIA)	Added DangerousGoodsExplosivesDetails Type and amended/added additional documentation elements. 
+v07  Issued	10/15	(redacted under section 40 of the FOIA)	Issued with LINX Message Details version 7.00.00.00
+v07     	12/15	(redacted under section 40 of the FOIA)	Updated Freight Consist with SpecialHandlingCode; corrected PassengerTrainConsistMessage/~/MaintenanceDefectLocation
+v08  Issued	12/15	Transmitted		Issued with LINX Message Details version 7.00.00.01
+v09     	02/16	(redacted under section 40 of the FOIA)	Corrected error - CommodityCode description
+v091     	03/16	(redacted under section 40 of the FOIA)	Corrected error - BrakeForce for Locomotive and Wagon in FreightTrainConsistMessage
+v091 Issued	03/16	Transmitted		Issued with LINX Message Details version 7.00.00.02 
+v091b     	04/16	(redacted under section 40 of the FOIA)	Corrected error - Maximum length of CellPhoneNumber increased from 10 characters to 20, to be aligned with Web Gemini field length.
+v091c     	04/16	(redacted under section 40 of the FOIA)	Corrected error - Locomotive MaximumSpeed and RestrictiveMaximumSpeed redefined for NR as MPH (instead of TAF/TAP TSI Type=Speed, which is defined in km/h)
+v091d     	04/16	(redacted under section 40 of the FOIA)	Corrected error - Locomotive PartialConsistFlag values "Y" / "N" changed to be "L" / "W"
+v091d     	04/16	(redacted under section 40 of the FOIA)	Cosmetic documentation edit to remove trailing spaces from values in TrainBrakeType description
+v092 Issued	04/16	(redacted under section 40 of the FOIA)	Issued 19-Apr-16 as an immediate change to enable completion of testing.
+v092b		06/16	(redacted under section 40 of the FOIA)	Corrected error - National Radio Number redefined from Integer 1-9999 to be a simpleType name="NRNType" as a String 0000-9999 to match TOPS data values
+v092c		06/16	(redacted under section 40 of the FOIA)	Corrected error - ContainerPosition change range restriction from 1-999 to 0-999 - this is position in ft from front of Wagon, and 0ft is a valid position
+v093 Issued 06/16	(redacted under section 40 of the FOIA)	Issued 09-Jun-16 as immediate changes to enable completion of testing
+v093 Issued	09/16	Transmitted		Issued with LINX Message Details version 7.01.01.03
+v093c		04/17	(redacted under section 40 of the FOIA)	Freight Train Consist Message - Corrected error found in testing - now allows a Trailing Locomotive at the trailing [rear] end of the Train Consist
+v093c		04/17	(redacted under section 40 of the FOIA)	Freight Train Consist Message - Updated to include TOPS 18 Comment Lines (TOPS Detail Type 18) in Locomotive and Wagon elements - these can contain operational information (over gauge, dangerous goods, etc)
+v093d	 	06/17	(redacted under section 40 of the FOIA)	Provided to Worldline for CCN40 changes to Freight Train Consist Messsage Impact Analysis
+v093e		11/17	(redacted under section 40 of the FOIA)	Edited annotation for RouteAvailability
+v093e		11/17	(redacted under section 40 of the FOIA)	Edited Type 18 Comment Lines to be 16 characters as found in testing (rather than 14 that was understood previously)
+v093e		11/17	(redacted under section 40 of the FOIA)	Edited FreightTrainConsist element to change TrainLocomotives, TrainWagons, TrailingLocomotives into Optional elements.
+v093e		11/17	(redacted under section 40 of the FOIA)	Provided to Worldline with corrections for CCN40 development and testing.
+v094 Issued	12/17	Transmitted		Issued for Transmittal 05-Dec-17.
+v094a		02/20	(redacted under section 40 of the FOIA)	Edited minOccurs for MaintenanceDefectLocation
+v095 Issued	02/20	Transmitted		Issued for Transmittal 24-Feb-20.
+(c) Copyright Network Rail</xs:documentation>
+	</xs:annotation>
+	<xs:include schemaLocation="GB_TAF_TAP_TSI_complete.xsd"/>
+	<xs:element name="Allocation">
+		<xs:annotation>
+			<xs:documentation>Allocation of Resource Group(s) to a train journey leg</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="AllocationSequenceNumber"/>
+				<xs:element ref="TrainOriginDateTime" minOccurs="0"/>
+				<xs:element ref="TrainOriginLocation" minOccurs="0"/>
+				<xs:element ref="ResourceGroupPosition" minOccurs="0"/>
+				<xs:element ref="DiagramDate" minOccurs="0"/>
+				<xs:element ref="DiagramNo" minOccurs="0"/>
+				<xs:element ref="TrainDestLocation" minOccurs="0"/>
+				<xs:element ref="TrainDestDateTime" minOccurs="0"/>
+				<xs:element ref="AllocationOriginLocation" minOccurs="0"/>
+				<xs:element ref="AllocationOriginDateTime" minOccurs="0"/>
+				<xs:element ref="AllocationOriginMiles" minOccurs="0"/>
+				<xs:element ref="AllocationDestinationLocation" minOccurs="0"/>
+				<xs:element ref="AllocationDestinationDateTime" minOccurs="0"/>
+				<xs:element ref="AllocationDestinationMiles" minOccurs="0"/>
+				<xs:element ref="Reversed" minOccurs="0"/>
+				<xs:element ref="ResourceGroup"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="AllocationDestinationDateTime" type="xs:dateTime">
+		<xs:annotation>
+			<xs:documentation>Time when allocation ends</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="AllocationDestinationLocation" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation>Location where allocation ends</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="AllocationDestinationMiles" type="xs:long">
+		<xs:annotation>
+			<xs:documentation>Allocation Destination miles from origin of train</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="AllocationlastUpdateDateTime" type="xs:dateTime">
+		<xs:annotation>
+			<xs:documentation>When allocation was last updated</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="AllocationOriginDateTime" type="xs:dateTime">
+		<xs:annotation>
+			<xs:documentation>Time when allocation starts</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="AllocationOriginLocation" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation>Location where allocation starts</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="AllocationOriginMiles" type="xs:long">
+		<xs:annotation>
+			<xs:documentation>Allocation at miles distance from origin of train</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="AllocationSequenceNumber" type="xs:long">
+		<xs:annotation>
+			<xs:documentation>Sequence number of train journey leg</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="AttachLocation" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation>The location where the vehicle is attached to the train.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="Cabs" type="Numeric1-1">
+		<xs:annotation>
+			<xs:documentation>Number of cabs</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="CellphoneNumber">
+		<xs:annotation>
+			<xs:documentation>Mobile number</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:minLength value="10"/>
+				<xs:maxLength value="20"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="CoachLetter">
+		<xs:annotation>
+			<xs:documentation>Coach letter from 'A' to 'Z' or Blank allowed</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:enumeration value=" "/>
+				<xs:enumeration value="A"/>
+				<xs:enumeration value="B"/>
+				<xs:enumeration value="C"/>
+				<xs:enumeration value="D"/>
+				<xs:enumeration value="E"/>
+				<xs:enumeration value="F"/>
+				<xs:enumeration value="G"/>
+				<xs:enumeration value="H"/>
+				<xs:enumeration value="I"/>
+				<xs:enumeration value="J"/>
+				<xs:enumeration value="K"/>
+				<xs:enumeration value="L"/>
+				<xs:enumeration value="M"/>
+				<xs:enumeration value="N"/>
+				<xs:enumeration value="O"/>
+				<xs:enumeration value="P"/>
+				<xs:enumeration value="Q"/>
+				<xs:enumeration value="R"/>
+				<xs:enumeration value="S"/>
+				<xs:enumeration value="T"/>
+				<xs:enumeration value="U"/>
+				<xs:enumeration value="V"/>
+				<xs:enumeration value="W"/>
+				<xs:enumeration value="X"/>
+				<xs:enumeration value="Y"/>
+				<xs:enumeration value="Z"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="CommodityCode" type="String3-3">
+		<xs:annotation>
+			<xs:documentation>Code indicating the type of material the wagon is carrying.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="Container">
+		<xs:annotation>
+			<xs:documentation>Container or Swap Body loaded on Wagon.</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="ContainerNumber" minOccurs="0"/>
+				<xs:element ref="ContainerPosition" minOccurs="0"/>
+				<xs:element ref="ContainerType" minOccurs="0"/>
+				<xs:element name="ContainerDangerousGoods" type="DangerousGoodsExplosivesDetails" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Container or Swap Body carries Dangerous Goods or semi-dangerous substance.</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="SpecialHandlingCode" minOccurs="0"/>
+				<xs:element ref="ContainerLength" minOccurs="0"/>
+				<xs:element ref="ContainerHeight" minOccurs="0"/>
+				<xs:element ref="ContainerWidthFlag" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Container Width Flag (value ‘X’ = 8’ 6” or 2.5m, ‘Y’ = 8’, or Blank)</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="ContainerHeight">
+		<xs:annotation>
+			<xs:documentation>Height of Container (in mm)</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:integer">
+				<xs:minInclusive value="1"/>
+				<xs:maxInclusive value="99999"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="ContainerLength">
+		<xs:annotation>
+			<xs:documentation>Length of Container (in ft)</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:integer">
+				<xs:minInclusive value="1"/>
+				<xs:maxInclusive value="99"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="ContainerNumber" type="String1-13">
+		<xs:annotation>
+			<xs:documentation>Container Number</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="ContainerPosition">
+		<xs:annotation>
+			<xs:documentation>Position of Container (ft) from front of Wagon</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:integer">
+				<xs:minInclusive value="0"/>
+				<xs:maxInclusive value="999"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="ContainerType" type="String3-3">
+		<xs:annotation>
+			<xs:documentation>Type of Container</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="ContainerWidthFlag">
+		<xs:annotation>
+			<xs:documentation>Container width Flag (value ‘X’ = 8’ 6” or 2.5m, ‘Y’ = 8’, or Blank))</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="String1-1">
+				<xs:enumeration value=" "/>
+				<xs:enumeration value="Y"/>
+				<xs:enumeration value="X"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="Control">
+		<xs:annotation>
+			<xs:documentation>The Control Code and corresponding Control Description</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:attribute name="Code" type="String1-2" use="required"/>
+			<xs:attribute name="Description" type="String1-40" use="required"/>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="CrewAllocation">
+		<xs:annotation>
+			<xs:documentation>Allocation of a Crew member to a train journey leg</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="CrewMemberId"/>
+				<xs:element ref="CrewMemberRoleType"/>
+				<xs:element ref="Depot" minOccurs="0"/>
+				<xs:element ref="AllocationOriginLocation" minOccurs="0"/>
+				<xs:element ref="AllocationOriginDateTime" minOccurs="0"/>
+				<xs:element ref="AllocationDestinationLocation" minOccurs="0"/>
+				<xs:element ref="AllocationDestinationDateTime" minOccurs="0"/>
+				<xs:element ref="AllocationlastUpdateDateTime" minOccurs="0"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="CrewAllocationMessage">
+		<xs:annotation>
+			<xs:documentation>This message is for train crew allocations.</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="MessageHeader"/>
+				<xs:element ref="MessageStatus">
+					<xs:annotation>
+						<xs:documentation>Assigned by the Sender 1=Notification</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="TrainOperationalIdentification"/>
+				<xs:element ref="OperationalTrainNumberIdentifier"/>
+				<xs:element ref="ResponsibleRU" minOccurs="0"/>
+				<xs:element ref="CrewAllocation" maxOccurs="unbounded"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="CrewMemberId" type="String1-14">
+		<xs:annotation>
+			<xs:documentation>Unique resource id--an identifier (unique to the employing TOC) which has no meaning to NR.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="CrewMemberRoleType">
+		<xs:annotation>
+			<xs:documentation> "D" or "C" or "M" depending on whether Driver or Conductor or Train Manager.</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:enumeration value="D"/>
+				<xs:enumeration value="C"/>
+				<xs:enumeration value="M"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="CrippleCode">
+		<xs:annotation>
+			<xs:documentation>Code indicating the problem with the wagon, if any. If the wagon is in working order, this field is blank.
+Cripple Codes can be:
+A - Defective Vehicle. Movement Authorised to a Specified Repair Point at a maximum speed of 35 MPH or other authorised speed
+C - Not to Go. Condemned Vehicle - Awaiting Disposal
+D - Not to Go. Damaged Vehicle for which costs may be recoverable. To be held until claim agreed
+E - Green Carded - Automatic Brake Defective. Brake Pipe Operative. N.B. Brake type code must also be reported
+F - Vehicle in Automatic Planned Preventative Maintenance scheme due PPM. (TOPS-generated code)
+G - Green Carded. For repairs - safe to travel at design speed
+H - Vehicle overdue VIBT by more than 28 days. (TOPS-generated)
+I - Not to Go. Condemned vehicle to be broken up on site
+J - Vehicle Authorised for 'One Journey Only' movement
+K - Defective RIV Vehicle labelled for Repairs Not to be Reloaded. Safe to travel at design speed.
+    To be returned to Registering Railway when empty
+L - Green Carded. TOPS-generated output for empty vehicle on auto PPM scheme.
+M - Defective RIV Vehicle. Labelled for Repairs. Safe to travel at design speed.
+    To be returned to or towards Registering Railway. May be re-loaded
+O - Vehicle overdue Mandatory PPM. (TOPS-generated)
+P - Vehicle Due Planned Preventative Maintenance
+Q - Defective Brake - Brakepipe NOT operative. Vehicle may not go forward with defective brake and
+    through pipe NOT in working order. N.B. Brake type code must also be reported
+R - Not to go. Red carded vehicle confined to siding where carded
+T - Defective Vehicle. Requires Transhipment and/or load adjustment prior to going forward to repair point
+U - Vehicle Due for VIBT. (TOPS-generated)
+W - Vehicles for Modification, Conversion or Overhaul
+X - Not to Go. Vehicle Stored or held awaiting decision
+Y - Red Carded. For 'Yard to Yard' movement only
+Z - Defective Vehicle. Not to Go. Awaiting Materials</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="String1-1">
+				<xs:enumeration value=" "/>
+				<xs:enumeration value="A"/>
+				<xs:enumeration value="C"/>
+				<xs:enumeration value="D"/>
+				<xs:enumeration value="E"/>
+				<xs:enumeration value="F"/>
+				<xs:enumeration value="G"/>
+				<xs:enumeration value="H"/>
+				<xs:enumeration value="I"/>
+				<xs:enumeration value="J"/>
+				<xs:enumeration value="K"/>
+				<xs:enumeration value="L"/>
+				<xs:enumeration value="M"/>
+				<xs:enumeration value="O"/>
+				<xs:enumeration value="P"/>
+				<xs:enumeration value="Q"/>
+				<xs:enumeration value="R"/>
+				<xs:enumeration value="T"/>
+				<xs:enumeration value="U"/>
+				<xs:enumeration value="W"/>
+				<xs:enumeration value="X"/>
+				<xs:enumeration value="Y"/>
+				<xs:enumeration value="Z"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="DangerousGoodsClass" type="String1-6">
+		<xs:annotation>
+			<xs:documentation>Dangerous Goods Class - existing TOPS codes - GB Rail Codes as documented in 'Pink Pages'.
+Value	Note
+2.2.OX	Although non-toxic, a tanker of oxygen is rather different to a tanker of nitrogen in case of fire!
+1.C		Commercial explosives
+1.M		Military explosives
+2.1
+2.2
+2.3
+3.A
+3.B
+4.1
+4.2
+4.3
+5.1
+5.2
+6.1
+6.1.H
+6.2
+7.R
+7.L		Nuclear flask - loaded
+7.D		Nuclear flask - empty (casing will have residual radioactivity)
+8
+9
+10
+NONDAN
+OTHPET
+UNCLAS</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="DangerousGoodsEmergencyCode" type="String6-6">
+		<xs:annotation>
+			<xs:documentation>Dangerous Goods Details 'UN Number' and 'Apha Code' for Emergency Contact.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:complexType name="DangerousGoodsExplosivesDetails">
+		<xs:sequence>
+			<xs:element ref="DangerousGoodsClass" minOccurs="0"/>
+			<xs:element ref="DangerousGoodsExplosivesFlag" minOccurs="0"/>
+			<xs:element ref="DangerousGoodsEmergencyCode" minOccurs="0"/>
+			<xs:element ref="ExplosivesEmergencyCode" minOccurs="0"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:element name="DangerousGoodsExplosivesFlag">
+		<xs:annotation>
+			<xs:documentation>Dangerous Goods/Explosive Flag</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="String1-10">
+				<xs:enumeration value="Dangerous"/>
+				<xs:enumeration value="Explosives"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="DateEnteredService" type="xs:date">
+		<xs:annotation>
+			<xs:documentation>Date vehicle entered service</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="DateRegistered" type="xs:date">
+		<xs:annotation>
+			<xs:documentation>Date vehicle registered in RSL</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="DateRegistrationExpires" type="xs:date">
+		<xs:annotation>
+			<xs:documentation>Date registration in RSL expires</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="Decor" type="String1-2">
+		<xs:annotation>
+			<xs:documentation>Decor of vehicle</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="Defect">
+		<xs:annotation>
+			<xs:documentation>Defects recorded in the GEMINI and RAVERS systems</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="MaintenanceUID" minOccurs="1" maxOccurs="1"/>
+				<xs:element ref="DefectCode" minOccurs="1" maxOccurs="1"/>
+				<xs:element ref="MaintenanceDefectLocation" minOccurs="0" maxOccurs="1"/>
+				<xs:element ref="DefectDescription" minOccurs="1" maxOccurs="1"/>
+				<xs:element ref="DefectStatus" minOccurs="1" maxOccurs="1"/>
+				<xs:element ref="MaintenanceRepairLocation" minOccurs="0" maxOccurs="1">
+					<xs:annotation>
+						<xs:documentation>RAVERS location of repair</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="RepairDescription" minOccurs="0"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="DefectCode" type="DefectCodeType">
+		<xs:annotation>
+			<xs:documentation>GEMINI defect code (T and RS defect code)</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:simpleType name="DefectCodeType">
+		<xs:annotation>
+			<xs:documentation>2 character T and RS defect code</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:minLength value="2"/>
+			<xs:maxLength value="2"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="DefectDescription">
+		<xs:annotation>
+			<xs:documentation>Description of the defect</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:minLength value="1"/>
+				<xs:maxLength value="50"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="DefectStatus" type="String1-1">
+		<xs:annotation>
+			<xs:documentation>Status of defect</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="Depot" type="String1-14">
+		<xs:annotation>
+			<xs:documentation>Depot associated with crew member.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="DetachLocation" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation>The location where the vehicle is detached from the train.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="DiagramDate" type="xs:date">
+		<xs:annotation>
+			<xs:documentation>Start date of diagram</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="DiagramNo" type="String1-6">
+		<xs:annotation>
+			<xs:documentation> Diagram Id of the allocation (e.g. EA1234)</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="ElectricTrainHeating" type="Numeric3-3">
+		<xs:annotation>
+			<xs:documentation>ETH value</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="EndOfDayMiles" type="xs:long">
+		<xs:annotation>
+			<xs:documentation>The expected mileage at the end of the current day</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="EVN" type="Numeric1-3"/>
+	<xs:element name="ExamPlanningIndicator" type="String1-1">
+		<xs:annotation>
+			<xs:documentation>System used for maintenance planning: 'R'= RAVERS, 'G' = GEMINI, or 'O' = Other</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="ExplosivesEmergencyCode" type="String6-6">
+		<xs:annotation>
+			<xs:documentation>Explosives Class Details for Emergency Contact.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="FleetId" type="String1-20">
+		<xs:annotation>
+			<xs:documentation>Fleet Id (i.e. fleet + "/" + class)</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="FreightTrainConsist">
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="TrainConsistDateTime"/>
+				<xs:element ref="TrainServiceCode"/>
+				<xs:element ref="TrainOriginLocation" minOccurs="0"/>
+				<xs:element ref="TrainDestLocation" minOccurs="0"/>
+				<xs:element name="TrainLengthFeet" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Total train length (loco + wagons) in feet</xs:documentation>
+					</xs:annotation>
+					<xs:simpleType>
+						<xs:restriction base="xs:integer">
+							<xs:minInclusive value="1"/>
+							<xs:maxInclusive value="9999"/>
+						</xs:restriction>
+					</xs:simpleType>
+				</xs:element>
+				<xs:element ref="TrainLatestLocation" minOccurs="0"/>
+				<xs:element ref="TrainBrakeType" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>The type of brake used when consisting the train.
+A - Air Brake
+B - Air Brake and Through Vacuum Pipe
+C - Unfitted (Self-propelled DCE plant with Train Brake Pipes) (These vehicles can be train consisted)
+E - Electro-Pneumatic
+F - Vacuum (A.F.I. Equipment)
+G - Vacuum and Through Air Pipe (A.F.I. Equipment)
+H - Air and Vacuum (Dual) (A.F.I. Equipment)
+O - Unfitted
+P - Through Vacuum Pipe
+Q - Through Air Pipe
+R - Through Air and Vacuum Pipe
+V - Vacuum Brake
+W - Vacuum Brake and Through Air Pipe
+X - Dual Brake (Vacuum and Air)
+Y - Unfitted (Self-propelled DCE Plant with Power Brake) (These vehicles cannot be train consisted)</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="PartialConsistFlag" minOccurs="0"/>
+				<xs:element ref="RT3973Flag">
+					<xs:annotation>
+						<xs:documentation>RT3973 Flag (Y or N depending on state of containers or wagons) - indicates whether RT3973 Documents are required.</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="TrainLocomotives" minOccurs="0"/>
+				<xs:element ref="TrainWagons" minOccurs="0"/>
+				<xs:element ref="TrailingLocomotives" minOccurs="0"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="FreightTrainConsistMessage">
+		<xs:annotation>
+			<xs:documentation>This message is for freight train consists.</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="MessageHeader"/>
+				<xs:element ref="MessageStatus">
+					<xs:annotation>
+						<xs:documentation>Assigned by the Sender 1=Notification</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="TrainOperationalIdentification" minOccurs="0"/>
+				<xs:element ref="OperationalTrainNumberIdentifier"/>
+				<xs:element ref="ReferenceOTN" minOccurs="0"/>
+				<xs:element ref="ResponsibleRU" minOccurs="0"/>
+				<xs:element ref="FreightTrainConsist"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="FuelCapacity" type="Numeric1-5">
+		<xs:annotation>
+			<xs:documentation>Fuel capacity of vehicle</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="HirerCode" type="CompanyCode">
+		<xs:annotation>
+			<xs:documentation>Company Code of TOC or FOC Hiring the vehicle</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="Horsepower">
+		<xs:annotation>
+			<xs:documentation>Horsepower for the loco</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:integer">
+				<xs:minInclusive value="1"/>
+				<xs:maxInclusive value="9999"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="Hours" type="xs:integer">
+		<xs:annotation>
+			<xs:documentation>Hours value at the point restriction was applied</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="Livery" type="String1-2">
+		<xs:annotation>
+			<xs:documentation>Livery of vehicle</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="Locomotive">
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element name="LocomotiveNumber" type="String1-10"/>
+				<xs:element ref="LocomotiveSpecialCharacteristics" minOccurs="0"/>
+				<xs:element ref="Type18CommentLines" minOccurs="0"/>
+				<xs:element ref="LocomotiveTrainPosition" minOccurs="0"/>
+				<xs:element ref="RouteAvailability" minOccurs="0"/>
+				<xs:element ref="LocomotiveLength" minOccurs="0"/>
+				<xs:element ref="MaximumSpeed" minOccurs="0"/>
+				<xs:element ref="Weight" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Weight of Locomotive in Tonnes</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="AttachLocation" minOccurs="0"/>
+				<xs:element ref="DetachLocation" minOccurs="0"/>
+				<xs:element ref="Horsepower" minOccurs="0"/>
+				<xs:element ref="NRN1" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>National Radio Network Number 1. For first cab.</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="NRN2" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>National Radio Network Number 2. For second cab.</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="RestrictedMaximumSpeed" minOccurs="0"/>
+				<xs:element name="LocomotiveBrakeForce" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Brake Force of Locomotive. Note that if a Locomotive is being towed by another Locomotive and has non-functioning brakes then this will have a "0" value for the Locomotive that is being towed. See also annotation for WagonBrakeForce.</xs:documentation>
+					</xs:annotation>
+					<xs:simpleType>
+						<xs:restriction base="xs:integer">
+							<xs:minInclusive value="0"/>
+							<xs:maxInclusive value="99"/>
+						</xs:restriction>
+					</xs:simpleType>
+				</xs:element>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="LocomotiveId" type="VehicleIdType"/>
+	<xs:element name="LocomotiveLength">
+		<xs:simpleType>
+			<xs:restriction base="xs:integer">
+				<xs:minInclusive value="1"/>
+				<xs:maxInclusive value="999"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="LocomotiveSpecialCharacteristics" type="String1-2">
+		<xs:annotation>
+			<xs:documentation>Special Characteristics of the Locomotive. Two 1-character codes.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="LocomotiveTrainPosition">
+		<xs:annotation>
+			<xs:documentation>Sequence number of Locomotive in the Train.</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:int">
+				<xs:minInclusive value="1"/>
+				<xs:maxInclusive value="999"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="MaintenanceDefectLocation">
+		<xs:annotation>
+			<xs:documentation>RAVERS location where defect was reported</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:minLength value="2"/>
+				<xs:maxLength value="3"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="MaintenanceRepairLocation">
+		<xs:annotation>
+			<xs:documentation>RAVERS location where defect was reported</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:minLength value="2"/>
+				<xs:maxLength value="3"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="MaintenanceUID">
+		<xs:annotation>
+			<xs:documentation>RAVERS UID of defect record</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:minLength value="9"/>
+				<xs:maxLength value="9"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="MaximumSpeed">
+		<xs:annotation>
+			<xs:documentation>Maximum speed in MPH</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:integer">
+				<xs:minInclusive value="1"/>
+				<xs:maxInclusive value="999"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="Miles" type="xs:long">
+		<xs:annotation>
+			<xs:documentation>Miles value at the point restriction was applied</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="ModificationIndicators" type="String1-6">
+		<xs:annotation>
+			<xs:documentation>Six one byte values indicating modification status</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="NextAvailableDateTime" type="xs:dateTime">
+		<xs:annotation>
+			<xs:documentation>Date and time vehicle is available from, only if  VehicleStatus is not 'N'</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="NextAvailableLocation" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation>Location vehicle is available from, only if  VehicleStatus is not 'N'</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:simpleType name="NRNType">
+		<xs:annotation>
+			<xs:documentation>National Radio Number – Numeric Code, used for Wagons and Locomotives - values in TOPS are mostly “0000” or are optional.
+			</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:minLength value="4"/>
+			<xs:maxLength value="4"/>
+			<xs:pattern value="[0-9]{4}"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="NRN1" type="NRNType">
+		<xs:annotation>
+			<xs:documentation>National Radio Number (1)</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="NRN2" type="NRNType">
+		<xs:annotation>
+			<xs:documentation>National Radio Number (2)</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="NRN3" type="NRNType">
+		<xs:annotation>
+			<xs:documentation>National Radio Number (3)</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="NumberOfSeats" type="Numeric3-3">
+		<xs:annotation>
+			<xs:documentation>Number of seats in vehicle</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:simpleType name="Numeric1-1">
+		<xs:restriction base="xs:integer">
+			<xs:minInclusive value="0"/>
+			<xs:maxInclusive value="9"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="Numeric1-2">
+		<xs:restriction base="xs:integer">
+			<xs:minInclusive value="0"/>
+			<xs:maxInclusive value="99"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="Numeric1-3">
+		<xs:restriction base="xs:integer">
+			<xs:minInclusive value="0"/>
+			<xs:maxInclusive value="999"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="Numeric1-4">
+		<xs:restriction base="xs:integer">
+			<xs:minInclusive value="0"/>
+			<xs:maxInclusive value="9999"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="Numeric1-8">
+		<xs:restriction base="xs:long">
+			<xs:minInclusive value="0"/>
+			<xs:maxInclusive value="99999999"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="OperatorCode" type="CompanyCode">
+		<xs:annotation>
+			<xs:documentation>Train Operating Company Code</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="OriginLocation" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation>The wagon's originating location.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="OwnerCode" type="String1-1">
+		<xs:annotation>
+			<xs:documentation>Single character Owner Code</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="PaintedNumber" type="String1-10"/>
+	<xs:element name="PartialConsistFlag">
+		<xs:annotation>
+			<xs:documentation>TOPS codes for partial consists. 
+L  - Consist with no Locomotive
+W  - Consist is not a light Locomotive (Class 0) and has no wagons or coaches</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:enumeration value="L"/>
+				<xs:enumeration value="W"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="PassengerTrainConsistMessage">
+		<xs:annotation>
+			<xs:documentation>This message is for passenger train consists.</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="MessageHeader"/>
+				<xs:element ref="MessageStatus">
+					<xs:annotation>
+						<xs:documentation>Assigned by the Sender 1=Notification</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="TrainOperationalIdentification"/>
+				<xs:element ref="OperationalTrainNumberIdentifier"/>
+				<xs:element ref="ResponsibleRU" minOccurs="0"/>
+				<xs:element ref="Allocation" minOccurs="0" maxOccurs="unbounded"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="PlannedResourceGroup" type="ResourceGroupIdType">
+		<xs:annotation>
+			<xs:documentation>This may be different from the Vehicle's current actual Resource Group</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="PreAssignmentDateTime" type="xs:dateTime">
+		<xs:annotation>
+			<xs:documentation>Date and time when Preassignment was applied</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="PreAssignmentDueDateTime" type="xs:dateTime">
+		<xs:annotation>
+			<xs:documentation>Date and time where resource group should stop</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="PreAssignmentReason" type="String1-20">
+		<xs:annotation>
+			<xs:documentation>Free format text for reason of Preassignment</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="PreAssignmentRequiredLocation" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation>Location where resource group should stop</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="RadioNumberA" type="Numeric1-4">
+		<xs:annotation>
+			<xs:documentation>Radio number for the "A" end of the vehicle</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="RadioNumberB" type="Numeric1-4">
+		<xs:annotation>
+			<xs:documentation>Radio number for the "B" end of the vehicle</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="RegisteredCategory" type="String1-1">
+		<xs:annotation>
+			<xs:documentation>Single character RSL Category code 
+CODE - SHORT DESCRIPTION       LONG DESCRIPTION
+A - PVTE OWNED FRGT VEHS (EXCL INTL FERRY)  	Privately Owned Freight Vehicles (Except International Ferry)
+B - PVTE OWNED INTL FERRY FRGT VEHS         	Privately Owned International Ferry Freight Vehicles
+C - BR REVENUE FRGT VEHS (EXCL INTL FERRY)  	BR Revenue Freight Vehicles (Except International Ferry)
+D - BR INTERNATIONAL FERRY FREIGHT VEHICLES 	BR International Ferry Freight Vehicles
+E - FOREIGN ADMIN OWNED OR REGSTRD FRGT VEHS	Foreign Administration Owned Or Registered Freight Vehicles
+F - BR SERVICE DEPARTMENT VEHICLES          	BR Service Department Vehicles
+G - LOCO HAULED PASSENGER COACHING STOCK    	Loco Hauled Passenger Coaching Stock
+H - LOCO HAULED NON-PASSENGER COACHING STOCK	Loco Hauled Non-Passenger Coaching Stock
+I - INTL L/H PASSENGER COACHING             	International Loco Hauled Passenger Coaching Stock (12 Digits)
+J - DIESEL MECHANICAL MULTIPLE UNITS (PASS) 	Diesel Mechanical Multiple Units (Passenger)
+K - DIESEL ELECTRIC MULTIPLE UNITS (PASS)   	Diesel Electric Multiple Units (Passenger)
+L - ELECTRIC MULTIPLE UNITS (PASSENGER)     	Electric Multiple Units (Passenger)
+N - EUROPEAN PASSENGER TRAINS               	European Passenger Trains - Eurostars
+P - DSL MECHANICAL MULTIPLE UNITS (NON-PASS)	Diesel Mechanical Multiple Units (Non-Passenger)
+Q - ELECTRIC MULTIPLE UNITS (NON-PASSENGER) 	Electric Multiple Units (Non-Passenger)
+R - PRIVATELY OWNED PASSENGER COACHING STOCK	Privately Owned Passenger Coaching Stock
+S - LOCOMOTIVES                             	Locomotives
+T - DEPARTMENTAL LOCOMOTIVES                	Departmental Locomotives
+X - SERVICE DEPARTMENT MULTIPLE UNIT STOCK  	Service Department Multiple Unit Stock
+Y - PRIVATELY OWNED LOCOMOTIVES             	Privately Owned Locomotives</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="RegisteredStatus">
+		<xs:annotation>
+			<xs:documentation>One character RSL Status value
+CODE - SHORT DESCRIPTION	LONG DESCRIPTION
+A - CONSTN                  Vehicle Planned/Under Construction/Awtg Transfer
+B - TRIALS            		VEH Delivered To Network Rail For Trial Running
+C - OPERNL             		Vehicle Registered Operational
+D - OBSCNT            		Obsolescent
+E - OBSLTE            		Obsolete
+F - WITHDN            		Vehicle Withdrawn From Use And Condemned
+G - DISPSD            		Vehicle Record Disposed Of
+I - DE-REGISTERED       	VEH De-Registered Per Railway Group Std GM/RT2453
+P - PDELTE             		Proposed For Deletion
+Y - VEHICLE RENUMBERED 		Vehicle Renumbered
+Z - VEHICLE NO ALLOCATED 	Vehicle Number Allocated</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="String1-1">
+				<xs:enumeration value="A"/>
+				<xs:enumeration value="B"/>
+				<xs:enumeration value="C"/>
+				<xs:enumeration value="D"/>
+				<xs:enumeration value="E"/>
+				<xs:enumeration value="F"/>
+				<xs:enumeration value="G"/>
+				<xs:enumeration value="I"/>
+				<xs:enumeration value="P"/>
+				<xs:enumeration value="Y"/>
+				<xs:enumeration value="Z"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="RepairDescription">
+		<xs:annotation>
+			<xs:documentation>Description of repair</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:minLength value="1"/>
+				<xs:maxLength value="50"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="ResourceGroup">
+		<xs:annotation>
+			<xs:documentation>ResourceGroup is a reference to a Unit or Set</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="ResourceGroupId">
+					<xs:annotation>
+						<xs:documentation>Id of a unit or set</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="TypeOfResource"/>
+				<xs:element ref="FleetId" minOccurs="0"/>
+				<xs:element ref="ResourceGroupStatus" minOccurs="0"/>
+				<xs:element ref="EndOfDayMiles" minOccurs="0"/>
+				<xs:element name="Preassignment" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>A preassignment is used to declare a desire to stop a particular resource group at a specified location and time. This is normally done if the resource group is due to receive maintenance.</xs:documentation>
+					</xs:annotation>
+					<xs:complexType>
+						<xs:sequence>
+							<xs:element ref="PreAssignmentRequiredLocation" minOccurs="0"/>
+							<xs:element ref="PreAssignmentDueDateTime" minOccurs="0"/>
+							<xs:element ref="PreAssignmentReason" minOccurs="0"/>
+							<xs:element ref="PreAssignmentDateTime" minOccurs="0"/>
+						</xs:sequence>
+					</xs:complexType>
+				</xs:element>
+				<xs:element ref="NextAvailableLocation" minOccurs="0"/>
+				<xs:element ref="NextAvailableDateTime" minOccurs="0"/>
+				<xs:element ref="Restriction" minOccurs="0" maxOccurs="unbounded">
+					<xs:annotation>
+						<xs:documentation>Restrictions applied to a Resource Group</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="Vehicle" maxOccurs="unbounded"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="ResourceGroupId" type="ResourceGroupIdType">
+		<xs:annotation>
+			<xs:documentation>Identifier id of Resource group (i.e. a set, a unit or a loco set)</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:simpleType name="ResourceGroupIdType">
+		<xs:annotation>
+			<xs:documentation>6 character id of Unit/Set</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="6"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="ResourceGroupPosition" type="Numeric1-2">
+		<xs:annotation>
+			<xs:documentation> Numeric position of unit within the train formation. Where more than one unit is allocated to a service, then the lead unit should be given a position of 1</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="ResourceGroupStatus" type="String1-1">
+		<xs:annotation>
+			<xs:documentation>The resource status value e.g. 'N' for Normal</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="ResourcePosition" type="Numeric1-2">
+		<xs:annotation>
+			<xs:documentation> Position of resource in Resource Group. Not present for vehicles not in a Resource Group.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="RestrictedMaximumSpeed">
+		<xs:annotation>
+			<xs:documentation>Maxiumum Speed (in MPH) including Restrictions and/or other restrictive working codes</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:integer">
+				<xs:minInclusive value="1"/>
+				<xs:maxInclusive value="999"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="Restriction">
+		<xs:annotation>
+			<xs:documentation>Restrictions as recorded on the GEMINI mainframe</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="RestrictionCode">
+					<xs:annotation>
+						<xs:documentation>Two character code used in the GEMINI restrictions file</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="Date">
+					<xs:annotation>
+						<xs:documentation>Date the restriction was applied</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="RestrictionComments">
+					<xs:annotation>
+						<xs:documentation>Comments field for the restriction</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="Miles" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>If present, specifies the miles value at the point the restriction was applied</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="Hours" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>If present, specifies the hours value at the point the restriction was applied</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="RestrictionCode">
+		<xs:annotation>
+			<xs:documentation>Two character Restriction Code used in GEMINI</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:minLength value="2"/>
+				<xs:maxLength value="2"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="RestrictionComments">
+		<xs:annotation>
+			<xs:documentation>Comments regarding Restriction</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:minLength value="1"/>
+				<xs:maxLength value="40"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="Reversed" type="ReversedTypeEnum">
+		<xs:annotation>
+			<xs:documentation>'Y' if the resource group has been through a reverse activity and is travelling 'backwards', or 'N' if it is travelling 'forwards'. The value should alternate whenever there is a reversal activity between two consecutive allocation legs.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:simpleType name="ReversedTypeEnum">
+		<xs:annotation>
+			<xs:documentation>"Y" for Reversed and "N" for Not Reversed</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="1"/>
+			<xs:enumeration value="Y"/>
+			<xs:enumeration value="N"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="RouteAvailability">
+		<xs:annotation>
+			<xs:documentation>Code used to match trains to routes on which they can physically travel ('RA' Values = 1-10).</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:integer">
+				<xs:minInclusive value="1"/>
+				<xs:maxInclusive value="10"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="RT3973Flag">
+		<xs:annotation>
+			<xs:documentation>RT3973 Flag (Y or N depending on state of containers or wagons).</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="String1-1">
+				<xs:enumeration value="N"/>
+				<xs:enumeration value="Y"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:simpleType name="SetIdType">
+		<xs:annotation>
+			<xs:documentation>6 character id of Set</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="6"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="SetTypeEnum">
+		<xs:annotation>
+			<xs:documentation>"L" for Locomotive, "S" for Set or "U" for Unit</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="1"/>
+			<xs:enumeration value="L"/>
+			<xs:enumeration value="S"/>
+			<xs:enumeration value="U"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="Smoking" type="Numeric3-3">
+		<xs:annotation>
+			<xs:documentation>Percentage of smoking seats</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="SpecialCharacteristics" type="String1-6">
+		<xs:annotation>
+			<xs:documentation>Six 1-character codes</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="SpecialHandlingCode" type="String3-3">
+		<xs:annotation>
+			<xs:documentation> Special Handling abbreviation.
+DAN - Vehicle/container loaded with dangerous goods - NOT to be loose shunted or have loose wagons shunted against it
+DIF - Discharged irradiated fuel flask - NOT to be loose shunted or have loose wagons shunted against it
+DIS - Dangerous discharged tank - NOT to be loose shunted or have loose wagons shunted against it
+DND - NOT to be diverted from booked route
+DNL - NOT to be loose shunted - NOT to be loose shunted or have loose wagons shunted against it
+EHC - Wagon conveying container with a height greater than 8‘6” but not exceeding 9'6  high (exceptional load)
+ELC - Wagon conveying 8'6 high container (exceptional load)
+EXA - Load examined
+HLW - When axle load of wagon exceeds 17.75 tonnes, other vehicles must not be loose shunted against this wagon
+HWC - Wagon conveying high and wide (exceptional load) container swapbody up to 8'6 high x 8'2½ wide
+OHL - Overhanging load. Load not to be moved without runner vehicles
+PER - Urgent perishable traffic
+RAM - Full wagon load of radioactive traffic. - NOT to be loose shunted or have loose wagons shunted against it
+RUN - Runner vehicle. Used with overhanging load
+SEP - Separation vehicle. Used in a train conveying dangerous goods
+TOX - Toxic gas traffic. - NOT to be loose shunted or have loose vehicles shunted against it
+WGH - Traffic to be weighed
+XLD - Exceptional load. Load requiring the issue of exceptional load form RT3973EXL
+DCM	- Not To Be Diverted From Booked Route
+NDA	- This Traffic Is Non-Dangerous For Rail Transport But May Be Dangerous By Other Modes.
+RSS	- Reserved Shipping Space - Documents Not Accompanying
+UCS	- Unchained Steel</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="SpecificType" type="VehicleSpecificType">
+		<xs:annotation>
+			<xs:documentation>Also known as the design code</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:simpleType name="String1-1">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="1"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String1-12">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="12"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String1-13">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="13"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String1-2">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="2"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String1-20">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="20"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String1-3">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="3"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String1-4">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="4"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String1-40">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="40"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String1-50">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="50"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String1-6">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="6"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String3-3">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="3"/>
+			<xs:maxLength value="3"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="String6-6">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="6"/>
+			<xs:maxLength value="6"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="SubHirerCode" type="CompanyCode">
+		<xs:annotation>
+			<xs:documentation>Company Code of SubHirer</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="TareWeight" type="Numeric1-8">
+		<xs:annotation>
+			<xs:documentation>Weight of the vehicle when empty in metric tons.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="TrailingLocomotives">
+		<xs:annotation>
+			<xs:documentation>If a train has Locomotives at the head and the tail of the train consist, these are the tail Locomotives.</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="Locomotive" maxOccurs="unbounded"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="TrainBrakeType">
+		<xs:annotation>
+			<xs:documentation>The type of brake used when consisting the train.
+A - Air Brake
+B - Air Brake and Through Vacuum Pipe
+C - Unfitted (Self-propelled DCE plant with Train Brake Pipes) (These vehicles can be train consisted)
+E - Electro-Pneumatic
+F- Vacuum (A.F.I. Equipment)
+G - Vacuum and Through Air Pipe (A.F.I. Equipment)
+H - Air and Vacuum (Dual) (A.F.I. Equipment)
+O - Unfitted
+P - Through Vacuum Pipe
+Q - Through Air Pipe
+R- Through Air and Vacuum Pipe
+V - Vacuum Brake
+W - Vacuum Brake and Through Air Pipe
+X - Dual Brake (Vacuum and Air)
+Y- Unfitted (Self-propelled DCE Plant with Power Brake) (These vehicles cannot be train consisted)
+			</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="String1-1">
+				<xs:enumeration value="A"/>
+				<xs:enumeration value="B"/>
+				<xs:enumeration value="C"/>
+				<xs:enumeration value="E"/>
+				<xs:enumeration value="F"/>
+				<xs:enumeration value="G"/>
+				<xs:enumeration value="H"/>
+				<xs:enumeration value="O"/>
+				<xs:enumeration value="P"/>
+				<xs:enumeration value="Q"/>
+				<xs:enumeration value="R"/>
+				<xs:enumeration value="V"/>
+				<xs:enumeration value="W"/>
+				<xs:enumeration value="X"/>
+				<xs:enumeration value="Y"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="TrainConsistDateTime" type="xs:dateTime">
+		<xs:annotation>
+			<xs:documentation>Time of Consist Details</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="TrainDestDateTime" type="xs:dateTime">
+		<xs:annotation>
+			<xs:documentation> Destination date and time of train</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="TrainDestLocation" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation> Destination location of train</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="TrainLatestLocation" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation>Last location recorded for train</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="TrainLocomotives">
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="Locomotive" maxOccurs="unbounded"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="TrainOriginDateTime" type="xs:dateTime">
+		<xs:annotation>
+			<xs:documentation> Origin date and time of train</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="TrainOriginLocation" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation>Origin location of train</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="TrainServiceCode" type="String1-8">
+		<xs:annotation>
+			<xs:documentation>Train Service Code</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="TrainWagons">
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="Wagon" maxOccurs="unbounded"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="Type18CommentLines">
+		<xs:annotation>
+			<xs:documentation>TOPS Comment line.                                                          
+This optionally enables the Train Operator (usually a FOC) or other TOPS User to report additional information in plain text (free format entry).
+These comments have to be entered into TOPS against a vehicle (Locomotive or Wagon), but are not necessarily vehicle specific.
+If present, then there will be at least one and a maximum of three TOPS Comment lines each with a length of up to 16 characters.
+			</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="Type18CommentLine" minOccurs="1" maxOccurs="3"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="Type18CommentLine">
+		<xs:annotation>
+			<xs:documentation>TOPS 'Comment Card' line - up to 16 Characters of freeform text.</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:string">
+				<xs:minLength value="1"/>
+				<xs:maxLength value="16"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="TypeOfResource" type="SetTypeEnum">
+		<xs:annotation>
+			<xs:documentation>Type of resource (i.e. U = unit, S = set, L = loco set).</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="TypeOfVehicle" type="VehicleTypeEnum">
+		<xs:annotation>
+			<xs:documentation>"C" for Coach or "L" for Locomotive</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="UltimateDestination" type="LocationIdent">
+		<xs:annotation>
+			<xs:documentation>Final location of the wagon.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="Vehicle">
+		<xs:annotation>
+			<xs:documentation>Passenger Coach or Locomotive details</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="VehicleId"/>
+				<xs:element ref="TypeOfVehicle"/>
+				<xs:element ref="ResourcePosition" minOccurs="0"/>
+				<xs:element ref="PlannedResourceGroup" minOccurs="0"/>
+				<xs:element ref="Control" minOccurs="0"/>
+				<xs:element ref="SpecificType" minOccurs="0"/>
+				<xs:element ref="Length" minOccurs="0"/>
+				<xs:element ref="Weight" minOccurs="0"/>
+				<xs:element ref="Livery" minOccurs="0"/>
+				<xs:element ref="Decor" minOccurs="0"/>
+				<xs:element ref="SpecialCharacteristics" minOccurs="0"/>
+				<xs:element ref="Smoking" minOccurs="0"/>
+				<xs:element ref="ElectricTrainHeating" minOccurs="0"/>
+				<xs:element ref="NumberOfSeats" minOccurs="0"/>
+				<xs:element ref="VehicleStatus" minOccurs="0"/>
+				<xs:element ref="NextAvailableLocation" minOccurs="0"/>
+				<xs:element ref="NextAvailableDateTime" minOccurs="0"/>
+				<xs:element ref="RegisteredStatus" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>One character Registered Status value (RSLStatus)</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="RadioNumberA" minOccurs="0"/>
+				<xs:element ref="RadioNumberB" minOccurs="0"/>
+				<xs:element ref="CoachLetter" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Coach letter from 'A' to Z' or Blank</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="FuelCapacity" minOccurs="0"/>
+				<xs:element ref="Cabs" minOccurs="0"/>
+				<xs:element ref="DateEnteredService" minOccurs="0"/>
+				<xs:element ref="DateRegistered" minOccurs="0"/>
+				<xs:element ref="DateRegistrationExpires" minOccurs="0"/>
+				<xs:element ref="CellphoneNumber" minOccurs="0"/>
+				<xs:element ref="RegisteredCategory" minOccurs="0"/>
+				<xs:element ref="ExamPlanningIndicator" minOccurs="0"/>
+				<xs:element ref="ModificationIndicators" minOccurs="0"/>
+				<xs:element ref="VehicleName" minOccurs="0"/>
+				<xs:element ref="TrainBrakeType" minOccurs="0"/>
+				<xs:element ref="MaximumSpeed" minOccurs="0"/>
+				<xs:element ref="OperatorCode" minOccurs="0"/>
+				<xs:element ref="OwnerCode" minOccurs="0"/>
+				<xs:element ref="HirerCode" minOccurs="0"/>
+				<xs:element ref="SubHirerCode" minOccurs="0"/>
+				<xs:element ref="Defect" minOccurs="0" maxOccurs="unbounded"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="VehicleId" type="VehicleIdType">
+		<xs:annotation>
+			<xs:documentation>Vehicle Number</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:simpleType name="VehicleIdType">
+		<xs:annotation>
+			<xs:documentation>6 character serial number of Vehicle</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="6"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="VehicleName" type="String1-50">
+		<xs:annotation>
+			<xs:documentation>Name of Vehicle</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:simpleType name="VehicleSpecificType">
+		<xs:annotation>
+			<xs:documentation>Specific type/design code of Vehicle</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:minLength value="5"/>
+			<xs:maxLength value="12"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="VehicleStatus" type="String1-1">
+		<xs:annotation>
+			<xs:documentation>If the vehicle is in a resource group, this will be the same or 'better' than the value for the resource group</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:simpleType name="VehicleTypeEnum">
+		<xs:annotation>
+			<xs:documentation>"C" for Coach or "L" for Locomotive</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="String1-1">
+			<xs:enumeration value="C"/>
+			<xs:enumeration value="L"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:element name="Wagon">
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="WagonTrainPosition"/>
+				<xs:element ref="WagonNumber"/>
+				<xs:element ref="RouteAvailability" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Used to  match trains to routes on which they can physically travel. Values 1 to 10.</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="WagonLengthFeet" minOccurs="0"/>
+				<xs:element name="WagonMaximumSpeed" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Current maximum speed of the vehicle (in MPH)</xs:documentation>
+					</xs:annotation>
+					<xs:simpleType>
+						<xs:restriction base="xs:integer">
+							<xs:minInclusive value="1"/>
+							<xs:maxInclusive value="999"/>
+						</xs:restriction>
+					</xs:simpleType>
+				</xs:element>
+				<xs:element ref="GrossWeight" minOccurs="0"/>
+				<xs:element ref="WagonTareWeight" minOccurs="0"/>
+				<xs:element ref="WagonNetWeight" minOccurs="0"/>
+				<xs:element ref="WagonLoadStatus" minOccurs="0"/>
+				<xs:element ref="WagonType" minOccurs="0"/>
+				<xs:element ref="UltimateDestination" minOccurs="0"/>
+				<xs:element ref="CommodityCode" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>TOPS Code indicating the type of material the wagon is carrying. 
+e.g. 507 for Paint, corrosive, flammable or Paint related material, corrosive, flammable.
+Empty wagons will show “ETY”.
+Discharged wagons will show Commodity Code applicable to the trace contents.</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="OriginLocation" minOccurs="0"/>
+				<xs:element ref="CrippleCode" minOccurs="0"/>
+				<xs:element ref="Customer" minOccurs="0"/>
+				<xs:element ref="AttachLocation" minOccurs="0"/>
+				<xs:element ref="DetachLocation" minOccurs="0"/>
+				<xs:element ref="NRN1" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>National Radio Network Number 1</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="NRN2" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>National Radio Network Number 2</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="NRN3" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>National Radio Network Number 3</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element name="WagonBrakeForce" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Brake Force of Wagon. WagonBrakeForce value is provided for information only and is not necessarily sufficient to calculate the actual train brake force. As an example, WagonBrakeForce value of zero is valid (known as a “through piped vehicle”). In normal circumstances train brake force is the sum of the brake force of the individual vehicles, there is extensive logic in TOPS to check various special cases.  
+Standard operational processes are in place under GO/RT3056 to ensure that any issues with a Freight Train not being safe to run are resolved and updated in TOPS and a revised Freight Train Consist will be provided to LINX (and published for TM) before the Train commences.</xs:documentation>
+					</xs:annotation>
+					<xs:simpleType>
+						<xs:restriction base="xs:integer">
+							<xs:minInclusive value="0"/>
+							<xs:maxInclusive value="99"/>
+						</xs:restriction>
+					</xs:simpleType>
+				</xs:element>
+				<xs:element name="WagonDangerousGoods" type="DangerousGoodsExplosivesDetails" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Wagon carries Dangerous Goods or semi-dangerous substance.</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="SpecialHandlingCode" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>If Wagon has requirements for Special Handling.</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element ref="SpecialCharacteristics" minOccurs="0"/>
+				<xs:element ref="Type18CommentLines" minOccurs="0"/>
+				<xs:element ref="WagonContainers" minOccurs="0"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="WagonContainers">
+		<xs:annotation>
+			<xs:documentation>Details of each Container or Swap Body on the Wagon.</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element ref="Container" maxOccurs="unbounded"/>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:element name="WagonLengthFeet">
+		<xs:annotation>
+			<xs:documentation>Outside wagon length in feet</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="xs:integer">
+				<xs:minInclusive value="1"/>
+				<xs:maxInclusive value="999"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="WagonLoadStatus">
+		<xs:annotation>
+			<xs:documentation>For a wagon this value will be ‘L’ when wagon is loaded; or ‘E’ when empty - exceptions are:
+For a tank wagon this value will be ‘D’ when the vehicle is discharged or 'P' if Purged. 
+For a separator/barrier wagon this value will be ‘S’ for a Separator or ’R’ for a Runner/Barrier wagon.</xs:documentation>
+		</xs:annotation>
+		<xs:simpleType>
+			<xs:restriction base="String1-1">
+				<xs:enumeration value="L"/>
+				<xs:enumeration value="E"/>
+				<xs:enumeration value="D"/>
+				<xs:enumeration value="P"/>
+				<xs:enumeration value="S"/>
+				<xs:enumeration value="R"/>
+			</xs:restriction>
+		</xs:simpleType>
+	</xs:element>
+	<xs:element name="WagonNetWeight" type="WeightValueKilo">
+		<xs:annotation>
+			<xs:documentation>Net Weight of load carried by the whole wagon in Kilograms.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="WagonNumber" type="String1-12">
+		<xs:annotation>
+			<xs:documentation>Unique identifier for the wagon. This may be 10 characters, or will be 12 characters if wagon has a European Vehicle Number or EVN.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="WagonTareWeight" type="WeightValueKilo">
+		<xs:annotation>
+			<xs:documentation>Tare Weight of Wagon when empty in kg</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="WagonType" type="String3-3">
+		<xs:annotation>
+			<xs:documentation>The TOPS Wagon Type - which is 3 characters long.
+- Bxx [Pre-10/83: Bogie steel-carrying wagons (Excluding coil)]
+- Cxx [CAx: Brake Vans, CBx-CZx: Covered bulk-carrying wagons]
+- Fxx [Flat wagons]
+- Hxx [Hopper wagons]
+- Ixx [Internationally-registered wagons]
+- Jxx [Pre-10/83: Bogie steel coil carrying wagons, Post-1990: Private-owner bogie wagons]
+- Kxx [Pre-10/83: 2-axle steel coil carrying wagons. Post-1990: Private-owner specialist wagons]
+- Mxx [Mineral wagons (excluding hoppers)]
+- Oxx [Open wagons]
+- Pxx [Pre-1990: Private-owner wagons (excl. tanks), Post-1990: 2/3-axle Private-owner wagons (excl. tanks)]
+- Rxx [Railway operating vehicles (non-revenue)]
+- Sxx [Pre-10/83: 2-axle steel-carrying wagons (Excluding coil), Post-10/83: 2-axle steel-carrying wagons]
+- Txx [Private-owner tank wagons]
+- Uxx [Pre-10/83: Uncovered open bulk-carrying wagons, Post-10/83: Not used]
+- Vxx [Vans]
+- Wxx [Pre-1984: Containers. Later for specialised RIV wagons]
+- Xxx [Pre-10/83: Exceptional and special purpose vehicles, 10/83-2003: Not used, 2003-present: Special Private-Owner wagons]
+- Yxx [Bogie departmental wagons]
+- Zxx [2/3-axle departmental wagons]</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:element name="Weight" type="WeightValueTonne">
+		<xs:annotation>
+			<xs:documentation>Weight in Tonnes</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+</xs:schema>
+
+
+
+
+
+
