@@ -99,15 +99,10 @@ func parseConsistMessage(xmlBody []byte) (*types.PassengerTrainConsistMessage, e
 }
 
 func tiplocFrom(loc *types.GeminiLocationIdent) string {
-	if loc == nil {
+	if loc == nil || loc.LocationSubsidiaryIdentification == nil {
 		return ""
 	}
-	for _, c := range loc.Subsidiary.Codes {
-		if s := strings.TrimSpace(c.Code); s != "" {
-			return s
-		}
-	}
-	return ""
+	return strings.TrimSpace(loc.LocationSubsidiaryIdentification.LocationSubsidiaryCode.Text)
 }
 
 func logConsist(msg *types.PassengerTrainConsistMessage) {
@@ -122,14 +117,38 @@ func logConsist(msg *types.PassengerTrainConsistMessage) {
 		return
 	}
 	for _, a := range msg.Allocations {
-		fmt.Printf("OperationalTrainNumber=%s core=%s start_date=%s ResourceGroupId=%s vehicles=%d origin=%s dest=%s\n",
+		rg := a.ResourceGroup
+		fmt.Printf("OperationalTrainNumber=%s core=%s start_date=%s ResourceGroupId=%s type=%s vehicles=%d vehicle_ids=%s origin=%s dest=%s\n",
 			op, core, start,
-			strings.TrimSpace(a.ResourceGroup.ID),
-			len(a.ResourceGroup.Vehicles),
-			tiplocFrom(a.TrainOrigin),
-			tiplocFrom(a.TrainDest),
+			strings.TrimSpace(rg.ResourceGroupId),
+			strings.TrimSpace(rg.TypeOfResource),
+			len(rg.Vehicles),
+			formatVehicles(rg.Vehicles),
+			tiplocFrom(a.TrainOriginLocation),
+			tiplocFrom(a.TrainDestLocation),
 		)
 	}
+}
+
+// formatVehicles lists each VehicleId with type (L=loco, C=coach) so HST power cars are visible alongside set id (ResourceGroupId).
+func formatVehicles(vs []types.GeminiVehicle) string {
+	if len(vs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, v := range vs {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		id := strings.TrimSpace(v.VehicleId)
+		t := strings.TrimSpace(v.TypeOfVehicle)
+		if t != "" {
+			fmt.Fprintf(&b, "%s(%s)", id, t)
+		} else {
+			b.WriteString(id)
+		}
+	}
+	return b.String()
 }
 
 func splitBrokers(s string) []string {
