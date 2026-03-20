@@ -1088,7 +1088,7 @@ func (dc *DataClient) GetServiceByUID(uid string, date *time.Time) (*api_types.S
 	query := `
 		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
 			   s.train_category, btr.description AS train_category_description, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
-			   s.train_status, s.atoc_code, COALESCE(
+			   COALESCE(NULLIF(TRIM(tst.description), ''), s.train_status) AS train_status, s.atoc_code, COALESCE(
 			   	CASE
 			   		WHEN LOWER(TRIM(toc.name)) LIKE '%unknown%' OR LOWER(TRIM(toc.name)) LIKE '%unkown%' THEN NULL
 			   		ELSE NULLIF(TRIM(toc.name), '')
@@ -1105,6 +1105,15 @@ func (dc *DataClient) GetServiceByUID(uid string, date *time.Time) (*api_types.S
 			ORDER BY r.id
 			LIMIT 1
 		) btr ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT r.description
+			FROM bplan_ref r
+			WHERE r.category = 'TST'
+			  AND UPPER(TRIM(r.subcode)) = UPPER(TRIM(s.train_status))
+			  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+			ORDER BY r.id
+			LIMIT 1
+		) tst ON TRUE
 		LEFT JOIN reference_toc toc ON s.atoc_code = toc.code
 		LEFT JOIN LATERAL (
 			SELECT r.description
@@ -1155,7 +1164,7 @@ func (dc *DataClient) GetServiceByID(id int, date time.Time) (*api_types.Service
 	query := `
 		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
 			   s.train_category, btr.description AS train_category_description, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
-			   s.train_status, s.atoc_code, COALESCE(
+			   COALESCE(NULLIF(TRIM(tst.description), ''), s.train_status) AS train_status, s.atoc_code, COALESCE(
 			   	CASE
 			   		WHEN LOWER(TRIM(toc.name)) LIKE '%unknown%' OR LOWER(TRIM(toc.name)) LIKE '%unkown%' THEN NULL
 			   		ELSE NULLIF(TRIM(toc.name), '')
@@ -1172,6 +1181,15 @@ func (dc *DataClient) GetServiceByID(id int, date time.Time) (*api_types.Service
 			ORDER BY r.id
 			LIMIT 1
 		) btr ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT r.description
+			FROM bplan_ref r
+			WHERE r.category = 'TST'
+			  AND UPPER(TRIM(r.subcode)) = UPPER(TRIM(s.train_status))
+			  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+			ORDER BY r.id
+			LIMIT 1
+		) tst ON TRUE
 		LEFT JOIN reference_toc toc ON s.atoc_code = toc.code
 		LEFT JOIN LATERAL (
 			SELECT r.description
