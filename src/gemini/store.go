@@ -25,8 +25,8 @@ func StoreConsistMessage(ctx context.Context, pg *pgxpool.Pool, msg *types.Passe
 	// Parse message date/time if present.
 	var msgTime *time.Time
 	if ts := strings.TrimSpace(msg.MessageHeader.MessageReference.MessageDateTime); ts != "" {
-		if t, err := time.Parse(time.RFC3339, ts); err == nil {
-			msgTime = &t
+		if t, err := parseGeminiMessageDateTime(ts); err == nil {
+			msgTime = t
 		}
 	}
 
@@ -145,5 +145,68 @@ func nullableString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// parseGeminiMessageDateTime parses LINX TAFTSI Gemini MessageDateTime values.
+// Some feeds omit an explicit timezone (e.g. `2026-03-18T22:41:06`), so we treat those values as UTC.
+func parseGeminiMessageDateTime(ts string) (*time.Time, error) {
+	ts = strings.TrimSpace(ts)
+	if ts == "" {
+		return nil, nil
+	}
+
+	// First try RFC3339/RFC3339Nano directly (handles offsets and `Z`).
+	var lastErr error
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		t = t.UTC()
+		return &t, nil
+	} else {
+		lastErr = err
+	}
+	if t, err := time.Parse(time.RFC3339, ts); err == nil {
+		t = t.UTC()
+		return &t, nil
+	} else {
+		lastErr = err
+	}
+
+	// Try timezone-less ISO timestamps (treat as UTC).
+	if t, err := time.Parse("2006-01-02T15:04:05", ts); err == nil {
+		t = t.UTC()
+		return &t, nil
+	} else {
+		lastErr = err
+	}
+	if t, err := time.Parse("2006-01-02T15:04:05.999999999", ts); err == nil {
+		t = t.UTC()
+		return &t, nil
+	} else {
+		lastErr = err
+	}
+
+	// As a final fallback, append `Z` when the input appears to have no timezone/offset.
+	// This turns `YYYY-MM-DDTHH:MM:SS[.ffffff]` into a RFC3339 timestamp.
+	noExplicitZone := true
+	if strings.HasSuffix(ts, "Z") || strings.HasSuffix(ts, "z") {
+		noExplicitZone = false
+	} else if len(ts) > 19 {
+		// Check for +/- offset after the date-time seconds portion (index 19).
+		tail := ts[19:]
+		if strings.Contains(tail, "+") || strings.Contains(tail, "-") {
+			noExplicitZone = false
+		}
+	}
+
+	if noExplicitZone {
+		candidate := ts + "Z"
+		if t, err := time.Parse(time.RFC3339Nano, candidate); err == nil {
+			t = t.UTC()
+			return &t, nil
+		} else {
+			lastErr = err
+		}
+	}
+
+	return nil, lastErr
 }
 

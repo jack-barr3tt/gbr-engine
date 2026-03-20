@@ -338,6 +338,24 @@ func (dc *DataClient) enrichServiceWithLocationsAndRealtime(service *api_types.S
 	return nil
 }
 
+func routeTiplocs(service api_types.ServiceResponse) (originTiploc string, destTiploc string) {
+	if len(service.Locations) == 0 {
+		return "", ""
+	}
+
+	origin := service.Locations[0]
+	dest := service.Locations[len(service.Locations)-1]
+
+	if len(origin.Location.TiplocCodes) > 0 {
+		originTiploc = origin.Location.TiplocCodes[0]
+	}
+	if len(dest.Location.TiplocCodes) > 0 {
+		destTiploc = dest.Location.TiplocCodes[0]
+	}
+
+	return originTiploc, destTiploc
+}
+
 func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQueryResult, error) {
 	filter, args := dc.buildServiceFilter(filters)
 	queryDate := queryDateFromFilters(filters)
@@ -490,7 +508,8 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 		}
 
 		for i := range services {
-			current, _, err := dc.GetGeminiForService(services[i].SignallingId, *targetDate)
+			originTiploc, destTiploc := routeTiplocs(services[i])
+			current, _, err := dc.GetGeminiForService(services[i].SignallingId, *targetDate, originTiploc, destTiploc)
 			if err == nil && len(current) > 0 {
 				currentCopy := current
 				services[i].GeminiResourceGroups = &currentCopy
@@ -534,7 +553,8 @@ func (dc *DataClient) GetServiceByUID(uid string, date *time.Time) (*api_types.S
 
 	// Enrich with Gemini allocations when a date is available.
 	if date != nil {
-		current, history, err := dc.GetGeminiForService(service.SignallingId, *date)
+		originTiploc, destTiploc := routeTiplocs(*service)
+		current, history, err := dc.GetGeminiForService(service.SignallingId, *date, originTiploc, destTiploc)
 		if err == nil {
 			currentCopy := current
 			historyCopy := history
@@ -572,7 +592,8 @@ func (dc *DataClient) GetServiceByID(id int, date time.Time) (*api_types.Service
 	}
 
 	// Enrich with Gemini allocations for this specific date.
-	if current, history, err := dc.GetGeminiForService(service.SignallingId, date); err == nil {
+	originTiploc, destTiploc := routeTiplocs(*service)
+	if current, history, err := dc.GetGeminiForService(service.SignallingId, date, originTiploc, destTiploc); err == nil {
 		currentCopy := current
 		historyCopy := history
 		service.GeminiResourceGroups = &currentCopy
@@ -726,14 +747,48 @@ func filterServicesByTargetDate(services []api_types.ServiceResponse, filters Se
 
 // GetGeminiForService fetches current and historical Gemini allocations for a service by signalling ID and date.
 // Gemini's OperationalTrainNumber matches the operational train ID (signalling_id), not the internal headcode.
-func (dc *DataClient) GetGeminiForService(signallingID string, date time.Time) (current []string, history []api_types.GeminiSnapshot, err error) {
-	rows, err := dc.pg.Query(context.Background(), `
-		SELECT resource_group_id, message_identifier, message_date_time
-		FROM gemini_allocation
-		WHERE operational_train_number = $1
-		  AND start_date = $2
-		ORDER BY message_date_time ASC
-	`, signallingID, date)
+func (dc *DataClient) GetGeminiForService(
+	signallingID string,
+	date time.Time,
+	originTiploc string,
+	destTiploc string,
+) (current []string, history []api_types.GeminiSnapshot, err error) {
+	routeClause := ""
+	args := []interface{}{signallingID, date}
+
+	// Gemini allocations for a single operational_train_number can include multiple diagrams
+	// (different origins/destinations). Filter to the route shown in the UI.
+	if originTiploc != "" && destTiploc != "" {
+		routeClause = `
+		  AND (
+		    (ga.train_origin_tiploc = $3 AND ga.train_dest_tiploc = $4)
+		     OR
+		    (ga.allocation_origin_tiploc = $3 AND ga.allocation_dest_tiploc = $4)
+		  )
+		`
+		args = append(args, originTiploc, destTiploc)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			ga.resource_group_id,
+			ga.message_identifier,
+			COALESCE(
+				ga.message_date_time,
+				gm.message_date_time,
+				gm.received_at,
+				ga.created_at
+			) AS effective_message_time
+		FROM gemini_allocation ga
+		LEFT JOIN gemini_message gm
+		  ON ga.message_identifier = gm.message_identifier
+		WHERE ga.operational_train_number = $1
+		  AND ga.start_date = $2
+		%s
+		ORDER BY effective_message_time ASC
+	`, routeClause)
+
+	rows, err := dc.pg.Query(context.Background(), query, args...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -749,16 +804,21 @@ func (dc *DataClient) GetGeminiForService(signallingID string, date time.Time) (
 	for rows.Next() {
 		var rgID string
 		var msgID sql.NullString
-		var msgTime sql.NullTime
-		if err := rows.Scan(&rgID, &msgID, &msgTime); err != nil {
+		var effectiveTime time.Time
+		if err := rows.Scan(&rgID, &msgID, &effectiveTime); err != nil {
 			return nil, nil, err
 		}
-		if rgID == "" || !msgTime.Valid {
+
+		// message_date_time may be NULL for older ingested rows if parsing failed.
+		// Use COALESCE(..., received_at, created_at) so we still get ordering + grouping.
+		if rgID == "" || !msgID.Valid {
 			continue
 		}
+
+		effectiveTime = effectiveTime.UTC()
 		key := snapshotKey{
 			Identifier: msgID.String,
-			Time:       msgTime.Time,
+			Time:       effectiveTime,
 		}
 		if _, ok := snapshotsMap[key]; !ok {
 			snapshotsMap[key] = make(map[string]struct{})
