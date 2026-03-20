@@ -34,6 +34,135 @@ func LoadTrainJourney(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, 
 	return journey, nil
 }
 
+// LoadTrainJourneysBatch fetches schedules and locations for multiple train UIDs in two queries
+// (one for schedules, one for all their locations) instead of 2N individual queries. Results are
+// written back to Redis as a pipeline so subsequent requests hit the cache.
+func LoadTrainJourneysBatch(ctx context.Context, db *pgxpool.Pool, rdb *redis.Client, trainUIDs []string, runDateStr string) (map[string]types.TrainJourney, error) {
+	if len(trainUIDs) == 0 {
+		return make(map[string]types.TrainJourney), nil
+	}
+
+	runDate, err := time.Parse("20060102", runDateStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid run date: %w", err)
+	}
+
+	// One query: best schedule per train UID that covers the run date.
+	rows, err := db.Query(ctx, `
+		SELECT DISTINCT ON (train_uid)
+			id, train_uid, schedule_days_runs, schedule_start_date, schedule_end_date
+		FROM schedule
+		WHERE train_uid = ANY($1)
+		  AND schedule_start_date <= $2
+		  AND schedule_end_date >= $2
+		ORDER BY train_uid, schedule_start_date DESC
+	`, trainUIDs, runDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch-load schedules: %w", err)
+	}
+
+	type schedInfo struct {
+		id        int
+		uid       string
+		daysRuns  string
+		startDate time.Time
+		endDate   time.Time
+	}
+
+	var validSchedules []schedInfo
+	var scheduleIDs []int
+	uidToSchedID := make(map[string]int)
+
+	for rows.Next() {
+		var s schedInfo
+		if err := rows.Scan(&s.id, &s.uid, &s.daysRuns, &s.startDate, &s.endDate); err != nil {
+			continue
+		}
+		if IsScheduleValidForDate(s.daysRuns, s.startDate, s.endDate, runDate) {
+			validSchedules = append(validSchedules, s)
+			scheduleIDs = append(scheduleIDs, s.id)
+			uidToSchedID[s.uid] = s.id
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating batch schedules: %w", err)
+	}
+
+	if len(scheduleIDs) == 0 {
+		return make(map[string]types.TrainJourney), nil
+	}
+
+	// One query: all locations for valid schedules.
+	locRows, err := db.Query(ctx, `
+		SELECT sl.schedule_id, sl.tiploc_code, sl.arrival::text, sl.departure::text, t.stanox
+		FROM schedule_location sl
+		LEFT JOIN tiploc t ON sl.tiploc_code = t.tiploc_code
+		WHERE sl.schedule_id = ANY($1)
+		ORDER BY sl.schedule_id, sl.location_order
+	`, scheduleIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch-load locations: %w", err)
+	}
+
+	stopsBySchedID := make(map[int][]types.Stop, len(scheduleIDs))
+	for locRows.Next() {
+		var schedID int
+		var tiplocCode string
+		var arrival, departure, stanox sql.NullString
+
+		if err := locRows.Scan(&schedID, &tiplocCode, &arrival, &departure, &stanox); err != nil {
+			continue
+		}
+		if !stanox.Valid || stanox.String == "" {
+			continue
+		}
+
+		stop := types.Stop{Stanox: stanox.String}
+		if arrival.Valid {
+			if len(arrival.String) >= 5 {
+				stop.PlannedArr = arrival.String[:5]
+			} else {
+				stop.PlannedArr = arrival.String
+			}
+		}
+		if departure.Valid {
+			if len(departure.String) >= 5 {
+				stop.PlannedDep = departure.String[:5]
+			} else {
+				stop.PlannedDep = departure.String
+			}
+		}
+		stopsBySchedID[schedID] = append(stopsBySchedID[schedID], stop)
+	}
+	locRows.Close()
+	if err := locRows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating batch locations: %w", err)
+	}
+
+	result := make(map[string]types.TrainJourney, len(validSchedules))
+	for _, s := range validSchedules {
+		result[s.uid] = types.TrainJourney{
+			UID:     s.uid,
+			RunDate: runDateStr,
+			Stops:   stopsBySchedID[s.id],
+		}
+	}
+
+	// Warm Redis cache via pipeline so future requests hit the cache.
+	if rdb != nil {
+		pipe := rdb.Pipeline()
+		for uid, journey := range result {
+			if b, err := json.Marshal(journey); err == nil {
+				pipe.Set(ctx, BuildScheduleKey(uid, runDateStr), b, 48*time.Hour)
+			}
+		}
+		pipe.Exec(ctx)
+	}
+
+	return result, nil
+}
+
 func MergeTrustEvent(journey *types.TrainJourney, trust *types.TrustBody) bool {
 	merged := false
 	for i, stop := range journey.Stops {

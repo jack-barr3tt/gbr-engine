@@ -1,3 +1,4 @@
-h1:dQFFjjjtBqwyulw5vOKsrYtVdJ3urR0EVByS+SmYB3A=
+h1:64nHMTMHzleMTAWJAWyFd3G9LojUP8WrfvXitHILrs8=
 20250115000000_add_bplan_tables.sql h1:AGAuh81Aqxxw5vWfEb4z6kbFiRg3gIOds5Kk+Yb8Glo=
 20260319000000_add_gemini_tables.sql h1:yPYAbdmsS72kghgQhcU4vco0xVVqAvXFNvH1WBwr2LY=
+20260320000000_add_performance_indexes.sql h1:W6NbuFXkC1EIMmBVr/X8hKgQCs6F0JPRDBDVkXzpTS8=

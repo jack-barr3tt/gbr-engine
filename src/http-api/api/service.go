@@ -11,7 +11,7 @@ import (
 
 const (
 	MaxLimit  = 500
-	MaxOffset = 1000
+	MaxOffset = 5000
 )
 
 func (s *APIServer) QueryServices(c *fiber.Ctx) error {

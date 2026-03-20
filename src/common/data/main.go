@@ -14,7 +14,8 @@ type DataClient struct {
 
 func NewDataClient(db *pgxpool.Pool, rdb *redis.Client, logger *zap.SugaredLogger) *DataClient {
 	return &DataClient{
-		pg:  db,
-		rdb: rdb,
+		pg:     db,
+		rdb:    rdb,
+		logger: logger,
 	}
 }

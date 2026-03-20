@@ -2,12 +2,13 @@ package data
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	api_types "github.com/jack-barr3tt/gbr-engine/src/common/api-types"
@@ -34,6 +35,7 @@ type LocationFilter struct {
 type ServiceQueryResult struct {
 	Services     []api_types.ServiceResponse
 	TotalResults int
+	Timings      map[string]int64 // stage name → milliseconds
 }
 
 func appendTimeArg(args *[]interface{}, argIndex *int, t *time.Time) int {
@@ -111,44 +113,44 @@ func needsPreviousDay(filters ServiceFilters) bool {
 	return earliest < cutoffMinutes
 }
 
-func buildLocationTimeClause(timeFromIdx, timeToIdx int) string {
+func buildSingleTimeClause(col string, timeFromIdx, timeToIdx int) string {
 	switch {
 	case timeFromIdx > 0 && timeToIdx > 0:
-		return fmt.Sprintf(`
-			AND (
-				sl.arrival::time BETWEEN $%d AND $%d
-				OR sl.departure::time BETWEEN $%d AND $%d
-			)
-		`, timeFromIdx, timeToIdx, timeFromIdx, timeToIdx)
+		return fmt.Sprintf("%s BETWEEN $%d AND $%d", col, timeFromIdx, timeToIdx)
 	case timeFromIdx > 0:
-		return fmt.Sprintf(`
-			AND (
-				sl.arrival::time >= $%d
-				OR sl.departure::time >= $%d
-			)
-		`, timeFromIdx, timeFromIdx)
+		return fmt.Sprintf("%s >= $%d", col, timeFromIdx)
 	case timeToIdx > 0:
-		return fmt.Sprintf(`
-			AND (
-				sl.arrival::time <= $%d
-				OR sl.departure::time <= $%d
-			)
-		`, timeToIdx, timeToIdx)
+		return fmt.Sprintf("%s <= $%d", col, timeToIdx)
 	default:
-		return ""
+		return "TRUE"
 	}
 }
 
 func buildLocationExistsClause(stanoxParamIndex, timeFromIdx, timeToIdx int) string {
-	timeClause := buildLocationTimeClause(timeFromIdx, timeToIdx)
+	tiplocSubq := fmt.Sprintf("SELECT tiploc_code FROM tiploc WHERE stanox = $%d", stanoxParamIndex)
+
+	if timeFromIdx == 0 && timeToIdx == 0 {
+		return fmt.Sprintf(`
+			s.id IN (
+				SELECT sl.schedule_id
+				FROM schedule_location sl
+				WHERE sl.tiploc_code IN (%s)
+			)
+		`, tiplocSubq)
+	}
+
+	arrivalCond := buildSingleTimeClause("sl.arrival", timeFromIdx, timeToIdx)
+	departureCond := buildSingleTimeClause("sl.departure", timeFromIdx, timeToIdx)
+
 	return fmt.Sprintf(`
-		EXISTS (
-			SELECT 1
-			FROM schedule_location sl
-			WHERE sl.schedule_id = s.id
-			  AND sl.tiploc_code IN (SELECT tiploc_code FROM tiploc WHERE stanox = $%d)%s
+		s.id IN (
+			SELECT sl.schedule_id FROM schedule_location sl
+			WHERE sl.tiploc_code IN (%s) AND %s
+			UNION
+			SELECT sl.schedule_id FROM schedule_location sl
+			WHERE sl.tiploc_code IN (%s) AND %s
 		)
-	`, stanoxParamIndex, timeClause)
+	`, tiplocSubq, arrivalCond, tiplocSubq, departureCond)
 }
 
 func (dc *DataClient) buildServiceFilter(filters ServiceFilters) (string, []interface{}) {
@@ -269,6 +271,65 @@ func buildRankOrderClause(stpPriority string, queryDateParam int) string {
 	`, queryDateParam, queryDateParam, queryDateParam, stpPriority)
 }
 
+func scanServiceRowWithVisitTime(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*api_types.ServiceResponse, string, error) {
+	var service api_types.ServiceResponse
+	var scheduleStartDate, scheduleEndDate time.Time
+	var scheduleDaysRuns string
+	var trainCategory, trainStatus, atocCode, tocName sql.NullString
+	var stpIndicator string
+	var visitTime sql.NullString
+
+	err := scanner.Scan(
+		&service.Id,
+		&service.TrainUid,
+		&service.SignallingId,
+		&service.Headcode,
+		&trainCategory,
+		&scheduleStartDate,
+		&scheduleEndDate,
+		&scheduleDaysRuns,
+		&trainStatus,
+		&atocCode,
+		&tocName,
+		&stpIndicator,
+		&visitTime,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if trainCategory.Valid {
+		service.TrainCategory = &trainCategory.String
+	}
+	if trainStatus.Valid {
+		service.TrainStatus = &trainStatus.String
+	}
+
+	startDate := openapi_types.Date{Time: scheduleStartDate}
+	endDate := openapi_types.Date{Time: scheduleEndDate}
+	service.ScheduleStartDate = &startDate
+	service.ScheduleEndDate = &endDate
+	service.ScheduleDaysRuns = &scheduleDaysRuns
+
+	if atocCode.Valid && tocName.Valid {
+		service.Operator = &api_types.Operator{
+			Code: atocCode.String,
+			Name: tocName.String,
+		}
+	}
+
+	cancelled := stpIndicator == "C"
+	service.Cancelled = &cancelled
+
+	vt := ""
+	if visitTime.Valid {
+		vt = visitTime.String
+	}
+	return &service, vt, nil
+}
+
 func scanServiceRow(scanner interface {
 	Scan(dest ...interface{}) error
 }) (*api_types.ServiceResponse, error) {
@@ -356,10 +417,89 @@ func routeTiplocs(service api_types.ServiceResponse) (originTiploc string, destT
 	return originTiploc, destTiploc
 }
 
-func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQueryResult, error) {
-	filter, args := dc.buildServiceFilter(filters)
-	queryDate := queryDateFromFilters(filters)
-	queryDateParam := 0
+func buildStopsCTE(loc LocationFilter, idx int, argIdx *int, args *[]interface{}, maxDateIdx, minDateIdx int, dayClause string) string {
+	tiplocAlias := fmt.Sprintf("tiploc_codes_%d", idx)
+	ssAlias := fmt.Sprintf("ss%d", idx)
+
+	stanoxIdx := *argIdx
+	*args = append(*args, loc.Stanox)
+	*argIdx++
+
+	tiplocCTE := fmt.Sprintf(`
+		%s AS MATERIALIZED (
+			SELECT tiploc_code FROM tiploc WHERE stanox = $%d
+		)
+	`, tiplocAlias, stanoxIdx)
+
+	var schedConds []string
+	if maxDateIdx > 0 {
+		schedConds = append(schedConds, fmt.Sprintf("s.schedule_start_date <= $%d", maxDateIdx))
+	}
+	if minDateIdx > 0 {
+		schedConds = append(schedConds, fmt.Sprintf("s.schedule_end_date >= $%d", minDateIdx))
+	}
+	if dayClause != "" {
+		schedConds = append(schedConds, dayClause)
+	}
+	schedJoinExtra := ""
+	if len(schedConds) > 0 {
+		schedJoinExtra = "AND " + strings.Join(schedConds, " AND ")
+	}
+
+	var timeCond string
+	if loc.TimeFrom != nil && loc.TimeTo != nil {
+		fromIdx := *argIdx
+		*args = append(*args, loc.TimeFrom.Format("15:04:05"))
+		*argIdx++
+		toIdx := *argIdx
+		*args = append(*args, loc.TimeTo.Format("15:04:05"))
+		*argIdx++
+		timeCond = fmt.Sprintf(
+			"AND (sl.departure BETWEEN $%d AND $%d OR sl.arrival BETWEEN $%d AND $%d)",
+			fromIdx, toIdx, fromIdx, toIdx,
+		)
+	} else if loc.TimeFrom != nil {
+		fromIdx := *argIdx
+		*args = append(*args, loc.TimeFrom.Format("15:04:05"))
+		*argIdx++
+		timeCond = fmt.Sprintf("AND (sl.departure >= $%d OR sl.arrival >= $%d)", fromIdx, fromIdx)
+	} else if loc.TimeTo != nil {
+		toIdx := *argIdx
+		*args = append(*args, loc.TimeTo.Format("15:04:05"))
+		*argIdx++
+		timeCond = fmt.Sprintf("AND (sl.departure <= $%d OR sl.arrival <= $%d)", toIdx, toIdx)
+	}
+
+	ssCTE := fmt.Sprintf(`
+		%s AS MATERIALIZED (
+			SELECT sl.schedule_id, MIN(COALESCE(sl.departure, sl.arrival)) AS visit_time
+			FROM %s tc
+			JOIN schedule_location sl ON sl.tiploc_code = tc.tiploc_code
+			JOIN schedule s ON s.id = sl.schedule_id %s
+			%s
+			GROUP BY sl.schedule_id
+		)
+	`, ssAlias, tiplocAlias, schedJoinExtra, timeCond)
+
+	return tiplocCTE + ",\n" + ssCTE
+}
+
+func passThroughDataCacheKey(filters ServiceFilters) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("ptdata|%+v|hc=%v|op=%v|dt=%v",
+		filters.PassesThrough,
+		filters.Headcode,
+		filters.OperatorCode,
+		filters.Date,
+	)))
+	return fmt.Sprintf("svc:data:%x", h)
+}
+
+type cachedIDEntry struct {
+	ID        int32  `json:"i"`
+	VisitTime string `json:"v,omitempty"` // "HH:MM:SS" or empty
+}
+
+func (dc *DataClient) buildPassesThroughQueries(filters ServiceFilters) (countQ string, countA []interface{}, dataQ string, dataA []interface{}) {
 	stpPriority := `
 		CASE s.stp_indicator
 			WHEN 'C' THEN 0
@@ -370,99 +510,358 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 			ELSE 5
 		END
 	`
-	orderClause := buildRankOrderClause(stpPriority, 0)
-	if queryDate != nil {
-		queryDateParam = len(args) + 1
-		orderClause = buildRankOrderClause(stpPriority, queryDateParam)
+
+	baseArgs := []interface{}{}
+	argIdx := 1
+
+	var minDate, maxDate, queryDateValue time.Time
+	var queryDate *time.Time
+	for _, loc := range filters.PassesThrough {
+		if loc.TimeFrom != nil {
+			t := loc.TimeFrom.Truncate(24 * time.Hour)
+			if minDate.IsZero() || t.Before(minDate) {
+				minDate = t
+			}
+			if maxDate.IsZero() || t.After(maxDate) {
+				maxDate = t
+			}
+			if queryDate == nil {
+				queryDateValue = t
+				queryDate = &queryDateValue
+			}
+		}
 	}
-	rankedCTE := fmt.Sprintf(`
-		WITH filtered AS (
-			SELECT
-				s.id,
-				s.train_uid,
-				s.signalling_id,
-				s.headcode,
-				s.train_category,
-				s.schedule_start_date,
-				s.schedule_end_date,
-				s.schedule_days_runs,
-				s.train_status,
-				s.atoc_code,
-				toc.name AS toc_name,
-				s.stp_indicator,
-				ROW_NUMBER() OVER (
-					PARTITION BY s.train_uid
-					ORDER BY
-						%s
-				) AS stp_rank
+	if queryDate == nil && filters.Date != nil {
+		t := startOfDay(*filters.Date)
+		minDate, maxDate, queryDateValue = t, t, t
+		queryDate = &queryDateValue
+	}
+	includePrevDay := queryDate != nil && needsPreviousDay(filters)
+
+	var maxDateIdx, minDateIdx int
+	var dayClause string
+	if !minDate.IsZero() {
+		maxDateIdx = argIdx
+		baseArgs = append(baseArgs, maxDate.Format("2006-01-02"))
+		argIdx++
+		minDateIdx = argIdx
+		baseArgs = append(baseArgs, minDate.Format("2006-01-02"))
+		argIdx++
+
+		if queryDate != nil {
+			dayOfWeek := int(queryDate.Weekday())
+			if dayOfWeek == 0 {
+				dayOfWeek = 6
+			} else {
+				dayOfWeek--
+			}
+			dayClause = fmt.Sprintf("SUBSTR(s.schedule_days_runs, %d, 1) = '1'", dayOfWeek+1)
+			if includePrevDay {
+				prevDay := (dayOfWeek + 6) % 7
+				dayClause = fmt.Sprintf(
+					"(SUBSTR(s.schedule_days_runs, %d, 1) = '1' OR SUBSTR(s.schedule_days_runs, %d, 1) = '1')",
+					dayOfWeek+1, prevDay+1,
+				)
+			}
+		}
+	}
+
+	cteParts := make([]string, 0, len(filters.PassesThrough)*2)
+	cteFromParts := make([]string, 0, len(filters.PassesThrough))
+
+	for i, loc := range filters.PassesThrough {
+		ssAlias := fmt.Sprintf("ss%d", i)
+		cteParts = append(cteParts, buildStopsCTE(loc, i, &argIdx, &baseArgs, maxDateIdx, minDateIdx, dayClause))
+		if i == 0 {
+			cteFromParts = append(cteFromParts, ssAlias)
+		} else {
+			cteFromParts = append(cteFromParts, fmt.Sprintf("JOIN %s ON %s.schedule_id = ss0.schedule_id", ssAlias, ssAlias))
+		}
+	}
+
+	cteSQL := "WITH " + strings.Join(cteParts, ",\n")
+	cteFromSQL := strings.Join(cteFromParts, "\n")
+
+	schedArgs := append([]interface{}{}, baseArgs...)
+	var schedConds []string
+
+	if filters.Headcode != nil {
+		schedConds = append(schedConds, fmt.Sprintf("s.signalling_id = $%d", argIdx))
+		schedArgs = append(schedArgs, *filters.Headcode)
+		argIdx++
+	}
+	if filters.OperatorCode != nil {
+		schedConds = append(schedConds, fmt.Sprintf("s.atoc_code = $%d", argIdx))
+		schedArgs = append(schedArgs, *filters.OperatorCode)
+		argIdx++
+	}
+
+	schedWhere := ""
+	if len(schedConds) > 0 {
+		schedWhere = "WHERE " + strings.Join(schedConds, " AND ")
+	}
+
+	countA = append([]interface{}{}, schedArgs...)
+	countQ = fmt.Sprintf(`
+		%s
+		SELECT COUNT(DISTINCT s.train_uid)
+		FROM %s
+		JOIN schedule s ON s.id = ss0.schedule_id
+		JOIN reference_toc toc ON s.atoc_code = toc.code
+		%s
+	`, cteSQL, cteFromSQL, schedWhere)
+
+	dataA = append([]interface{}{}, schedArgs...)
+	queryDateParam := 0
+	if queryDate != nil {
+		queryDateParam = len(dataA) + 1
+		dataA = append(dataA, *queryDate)
+	}
+	rankOrder := buildRankOrderClause(stpPriority, queryDateParam)
+
+	dataQ = fmt.Sprintf(`
+		%s
+		SELECT d.id, d.train_uid, d.signalling_id, d.headcode,
+		       d.train_category, d.schedule_start_date, d.schedule_end_date, d.schedule_days_runs,
+		       d.train_status, d.atoc_code, d.toc_name, d.stp_indicator,
+		       d.visit_time
+		FROM (
+			SELECT DISTINCT ON (s.train_uid)
+				s.id, s.train_uid, s.signalling_id, s.headcode,
+				s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
+				s.train_status, s.atoc_code, toc.name AS toc_name, s.stp_indicator,
+				ss0.visit_time
+			FROM %s
+			JOIN schedule s ON s.id = ss0.schedule_id
+			JOIN reference_toc toc ON s.atoc_code = toc.code
+			%s
+			ORDER BY s.train_uid, %s
+		) d
+		ORDER BY d.visit_time IS NULL, d.visit_time, d.schedule_start_date, d.signalling_id
+	`, cteSQL, cteFromSQL, schedWhere, rankOrder)
+
+	return
+}
+
+func (dc *DataClient) buildScheduleFirstQueries(filters ServiceFilters) (countQ string, countA []interface{}, dataQ string, dataA []interface{}) {
+	filter, args := dc.buildServiceFilter(filters)
+	queryDate := queryDateFromFilters(filters)
+
+	stpPriority := `
+		CASE s.stp_indicator
+			WHEN 'C' THEN 0
+			WHEN 'V' THEN 1
+			WHEN 'O' THEN 2
+			WHEN 'N' THEN 3
+			WHEN 'P' THEN 4
+			ELSE 5
+		END
+	`
+
+	rankOrder := buildRankOrderClause(stpPriority, 0)
+	countA = append([]interface{}{}, args...)
+	countQ = fmt.Sprintf(`
+		SELECT COUNT(DISTINCT s.train_uid)
+		FROM schedule s
+		JOIN reference_toc toc ON s.atoc_code = toc.code
+		%s
+	`, filter)
+
+	dataA = append([]interface{}{}, args...)
+	if queryDate != nil {
+		queryDateParam := len(dataA) + 1
+		rankOrder = buildRankOrderClause(stpPriority, queryDateParam)
+		dataA = append(dataA, *queryDate)
+	}
+
+	limitParam := len(dataA) + 1
+	offsetParam := len(dataA) + 2
+	dataA = append(dataA, filters.Limit, filters.Offset)
+
+	dataQ = fmt.Sprintf(`
+		SELECT d.id, d.train_uid, d.signalling_id, d.headcode,
+		       d.train_category, d.schedule_start_date, d.schedule_end_date, d.schedule_days_runs,
+		       d.train_status, d.atoc_code, d.toc_name, d.stp_indicator
+		FROM (
+			SELECT DISTINCT ON (s.train_uid)
+				s.id, s.train_uid, s.signalling_id, s.headcode,
+				s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
+				s.train_status, s.atoc_code, toc.name AS toc_name, s.stp_indicator
 			FROM schedule s
 			JOIN reference_toc toc ON s.atoc_code = toc.code
 			%s
-		)
-	`, orderClause, filter)
-	countQuery := fmt.Sprintf(`
-		%s
-		SELECT COUNT(*)
-		FROM filtered
-		WHERE stp_rank = 1
-	`, rankedCTE)
-
-	countArgs := append([]interface{}{}, args...)
-	if queryDate != nil {
-		countArgs = append(countArgs, *queryDate)
-	}
-	var totalResults int
-	err := dc.pg.QueryRow(context.Background(), countQuery, countArgs...).Scan(&totalResults)
-	if err != nil {
-		return nil, fmt.Errorf("failed to count services: %w", err)
-	}
-
-	mainQueryArgs := append([]interface{}{}, args...)
-	if queryDate != nil {
-		mainQueryArgs = append(mainQueryArgs, *queryDate)
-	}
-
-	targetStanox := primaryStanox(filters.PassesThrough)
-
-	orderJoin := ""
-	resultOrderClause := "ORDER BY f.schedule_start_date ASC, f.signalling_id ASC"
-	if targetStanox != "" {
-		targetStanoxParam := len(mainQueryArgs) + 1
-		mainQueryArgs = append(mainQueryArgs, targetStanox)
-		orderJoin = fmt.Sprintf(`
-			LEFT JOIN LATERAL (
-				SELECT
-					COALESCE(sl.departure::text, sl.arrival::text) AS order_time
-				FROM schedule_location sl
-				WHERE sl.schedule_id = f.id
-					AND sl.tiploc_code IN (SELECT tiploc_code FROM tiploc WHERE stanox = $%d)
-				ORDER BY sl.location_order
-				LIMIT 1
-			) order_loc ON TRUE
-		`, targetStanoxParam)
-		resultOrderClause = `
-			ORDER BY
-				order_loc.order_time IS NULL,
-				order_loc.order_time,
-				f.schedule_start_date,
-				f.signalling_id
-		`
-	}
-	query := fmt.Sprintf(`
-		%s
-		SELECT f.id, f.train_uid, f.signalling_id, f.headcode,
-			   f.train_category, f.schedule_start_date, f.schedule_end_date, f.schedule_days_runs,
-			   f.train_status, f.atoc_code, f.toc_name, f.stp_indicator
-		FROM filtered f
-		%s
-		WHERE f.stp_rank = 1
-		%s
+			ORDER BY s.train_uid, %s
+		) d
+		ORDER BY d.schedule_start_date ASC, d.signalling_id ASC
 		LIMIT $%d OFFSET $%d
-	`, rankedCTE, orderJoin, resultOrderClause, len(mainQueryArgs)+1, len(mainQueryArgs)+2)
+	`, filter, rankOrder, limitParam, offsetParam)
 
-	mainQueryArgs = append(mainQueryArgs, filters.Limit, filters.Offset)
+	return
+}
 
-	rows, err := dc.pg.Query(context.Background(), query, mainQueryArgs...)
+func (dc *DataClient) fetchServicesByIDs(pageEntries []cachedIDEntry) ([]api_types.ServiceResponse, error) {
+	if len(pageEntries) == 0 {
+		return nil, nil
+	}
+	ids := make([]int32, len(pageEntries))
+	for i, e := range pageEntries {
+		ids[i] = e.ID
+	}
+
+	rows, err := dc.pg.Query(context.Background(), `
+		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
+		       s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
+		       s.train_status, s.atoc_code, toc.name AS toc_name, s.stp_indicator
+		FROM schedule s
+		JOIN reference_toc toc ON s.atoc_code = toc.code
+		WHERE s.id = ANY($1)
+	`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("fetchServicesByIDs: %w", err)
+	}
+	defer rows.Close()
+
+	byID := make(map[int32]api_types.ServiceResponse, len(pageEntries))
+	for rows.Next() {
+		svc, err := scanServiceRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("fetchServicesByIDs scan: %w", err)
+		}
+		byID[int32(svc.Id)] = *svc
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("fetchServicesByIDs rows: %w", err)
+	}
+
+	result := make([]api_types.ServiceResponse, 0, len(pageEntries))
+	for _, e := range pageEntries {
+		if svc, ok := byID[e.ID]; ok {
+			result = append(result, svc)
+		}
+	}
+	return result, nil
+}
+
+func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQueryResult, error) {
+	tTotal := time.Now()
+
+	if len(filters.PassesThrough) > 0 {
+		dataCacheKey := passThroughDataCacheKey(filters)
+		if cached, err := dc.rdb.Get(context.Background(), dataCacheKey).Result(); err == nil {
+			var allEntries []cachedIDEntry
+			if json.Unmarshal([]byte(cached), &allEntries) == nil {
+				tData := time.Now()
+
+				total := len(allEntries)
+				start := filters.Offset
+				if start > total {
+					start = total
+				}
+				end := start + filters.Limit
+				if end > total {
+					end = total
+				}
+				pageEntries := allEntries[start:end]
+
+				services, err := dc.fetchServicesByIDs(pageEntries)
+				if err != nil {
+					return nil, err
+				}
+				dataMs := time.Since(tData).Milliseconds()
+
+				var scheduleIDs []int
+				for _, svc := range services {
+					scheduleIDs = append(scheduleIDs, svc.Id)
+				}
+
+				tLocs := time.Now()
+				if len(scheduleIDs) > 0 {
+					allStops, err := dc.fetchScheduleLocations(scheduleIDs...)
+					if err != nil {
+						return nil, fmt.Errorf("cache hit: fetch locations: %w", err)
+					}
+					for i := range services {
+						services[i].Locations = allStops[services[i].Id]
+					}
+					dc.sortServices(services, filters)
+				}
+
+				tGemini := time.Now()
+				if len(services) > 0 {
+					targetDate := queryDateFromFilters(filters)
+					if targetDate == nil {
+						now := time.Now().UTC()
+						targetDate = &now
+					}
+					dc.GetGeminiForServices(services, *targetDate)
+				}
+
+				timings := map[string]int64{
+					"count_query":    0,
+					"count_cached":   1,
+					"data_query":     dataMs,
+					"fetch_locations": time.Since(tLocs).Milliseconds(),
+					"gemini":         time.Since(tGemini).Milliseconds(),
+				}
+				timings["total_db"] = time.Since(tTotal).Milliseconds()
+
+				if dc.logger != nil {
+					dc.logger.Infow("services: GetServicesWithFilters (data cache hit)",
+						"data_query_ms", dataMs,
+						"total_db_ms", timings["total_db"],
+						"total_results", total,
+						"returned", len(services),
+					)
+				}
+
+				return &ServiceQueryResult{
+					Services:     services,
+					TotalResults: total,
+					Timings:      timings,
+				}, nil
+			}
+		}
+	}
+
+	var countQuery string
+	var countArgs []interface{}
+	var dataQuery string
+	var mainQueryArgs []interface{}
+
+	if len(filters.PassesThrough) > 0 {
+		countQuery, countArgs, dataQuery, mainQueryArgs = dc.buildPassesThroughQueries(filters)
+	} else {
+		countQuery, countArgs, dataQuery, mainQueryArgs = dc.buildScheduleFirstQueries(filters)
+	}
+
+	tQueries := time.Now()
+
+	countCacheKey := func() string {
+		h := sha256.Sum256([]byte(fmt.Sprintf("%s|%v", countQuery, countArgs)))
+		return fmt.Sprintf("svc:cnt:%x", h)
+	}()
+
+	tCount := time.Now()
+	var totalResults int
+	countCached := false
+	if cached, err := dc.rdb.Get(context.Background(), countCacheKey).Result(); err == nil {
+		if n, parseErr := strconv.Atoi(cached); parseErr == nil {
+			totalResults = n
+			countCached = true
+		}
+	}
+
+	if !countCached {
+		if err := dc.pg.QueryRow(context.Background(), countQuery, countArgs...).Scan(&totalResults); err != nil {
+			return nil, fmt.Errorf("failed to count services: %w", err)
+		}
+		dc.rdb.Set(context.Background(), countCacheKey, strconv.Itoa(totalResults), 60*time.Second)
+	}
+
+	countMs := time.Since(tCount).Milliseconds()
+
+	tData := time.Now()
+	rows, err := dc.pg.Query(context.Background(), dataQuery, mainQueryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute service query: %w", err)
 	}
@@ -470,56 +869,115 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 
 	services := []api_types.ServiceResponse{}
 	var scheduleIDs []int
+	var allEntries []cachedIDEntry // populated only for passes_through path
 
 	for rows.Next() {
-		service, err := scanServiceRow(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan service row: %w", err)
+		var service *api_types.ServiceResponse
+		if len(filters.PassesThrough) > 0 {
+			var visitTimeStr string
+			var scanErr error
+			service, visitTimeStr, scanErr = scanServiceRowWithVisitTime(rows)
+			if scanErr != nil {
+				return nil, fmt.Errorf("failed to scan service row: %w", scanErr)
+			}
+			allEntries = append(allEntries, cachedIDEntry{ID: int32(service.Id), VisitTime: visitTimeStr})
+		} else {
+			var scanErr error
+			service, scanErr = scanServiceRow(rows)
+			if scanErr != nil {
+				return nil, fmt.Errorf("failed to scan service row: %w", scanErr)
+			}
 		}
-
 		scheduleIDs = append(scheduleIDs, service.Id)
 		services = append(services, *service)
 	}
 
-	if err = rows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating service rows: %w", err)
 	}
+	dataMs := time.Since(tData).Milliseconds()
 
+	if len(filters.PassesThrough) > 0 && len(allEntries) > 0 {
+		if data, marshalErr := json.Marshal(allEntries); marshalErr == nil {
+			dc.rdb.Set(context.Background(), passThroughDataCacheKey(filters), data, 10*time.Minute)
+		}
+		totalResults = len(allEntries)
+		start := filters.Offset
+		if start > len(services) {
+			start = len(services)
+		}
+		end := start + filters.Limit
+		if end > len(services) {
+			end = len(services)
+		}
+		services = services[start:end]
+		scheduleIDs = scheduleIDs[start : start+len(services)]
+	}
+
+	if dc.logger != nil {
+		dc.logger.Infow("services: queries done",
+			"count_query_ms", countMs,
+			"count_cached", countCached,
+			"data_query_ms", dataMs,
+			"both_queries_ms", time.Since(tQueries).Milliseconds(),
+			"total_results", totalResults,
+			"returned", len(services),
+		)
+	}
+
+	countCachedInt := int64(0)
+	if countCached {
+		countCachedInt = 1
+	}
+	timings := map[string]int64{
+		"count_query":  countMs,
+		"count_cached": countCachedInt,
+		"data_query":   dataMs,
+	}
+
+	tLocs := time.Now()
 	if len(scheduleIDs) > 0 {
 		allStops, err := dc.fetchScheduleLocations(scheduleIDs...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch schedule locations: %w", err)
 		}
-
 		for i := range services {
 			services[i].Locations = allStops[services[i].Id]
 		}
-
 		dc.sortServices(services, filters)
-		services = filterServicesByTargetDate(services, filters)
 	}
+	timings["fetch_locations"] = time.Since(tLocs).Milliseconds()
 
-	// Best-effort Gemini enrichment for list view: use target date from filters if available, otherwise today.
+	// Best-effort Gemini enrichment for list view: batched single query for all services.
+	tGemini := time.Now()
 	if len(services) > 0 {
 		targetDate := queryDateFromFilters(filters)
 		if targetDate == nil {
 			now := time.Now().UTC()
 			targetDate = &now
 		}
+		dc.GetGeminiForServices(services, *targetDate)
+	}
+	timings["gemini"] = time.Since(tGemini).Milliseconds()
 
-		for i := range services {
-			originTiploc, destTiploc := routeTiplocs(services[i])
-			current, _, err := dc.GetGeminiForService(services[i].SignallingId, *targetDate, originTiploc, destTiploc)
-			if err == nil && len(current) > 0 {
-				currentCopy := current
-				services[i].GeminiResourceGroups = &currentCopy
-			}
-		}
+	timings["total_db"] = time.Since(tTotal).Milliseconds()
+
+	if dc.logger != nil {
+		dc.logger.Infow("services: GetServicesWithFilters",
+			"count_query_ms", timings["count_query"],
+			"data_query_ms", timings["data_query"],
+			"fetch_locations_ms", timings["fetch_locations"],
+			"gemini_ms", timings["gemini"],
+			"total_db_ms", timings["total_db"],
+			"total_results", totalResults,
+			"returned", len(services),
+		)
 	}
 
 	return &ServiceQueryResult{
 		Services:     services,
 		TotalResults: totalResults,
+		Timings:      timings,
 	}, nil
 }
 
@@ -745,95 +1203,54 @@ func filterServicesByTargetDate(services []api_types.ServiceResponse, filters Se
 	return filtered
 }
 
-// GetGeminiForService fetches current and historical Gemini allocations for a service by signalling ID and date.
-// Gemini's OperationalTrainNumber matches the operational train ID (signalling_id), not the internal headcode.
-func (dc *DataClient) GetGeminiForService(
-	signallingID string,
-	date time.Time,
-	originTiploc string,
-	destTiploc string,
-) (current []string, history []api_types.GeminiSnapshot, err error) {
-	routeClause := ""
-	args := []interface{}{signallingID, date}
+// geminiAllocationRow holds one row from a gemini_allocation + gemini_message join.
+type geminiAllocationRow struct {
+	ResourceGroupID        string
+	MessageIdentifier      sql.NullString
+	TrainOriginTiploc      sql.NullString
+	TrainDestTiploc        sql.NullString
+	AllocationOriginTiploc sql.NullString
+	AllocationDestTiploc   sql.NullString
+	EffectiveTime          time.Time
+}
 
-	// Gemini allocations for a single operational_train_number can include multiple diagrams
-	// (different origins/destinations). Filter to the route shown in the UI.
+// buildGeminiResult converts a slice of raw allocation rows into the current resource-group list
+// (latest snapshot) and the full ordered history. Route filtering is applied in-memory using
+// originTiploc/destTiploc when both are non-empty.
+func buildGeminiResult(rows []geminiAllocationRow, originTiploc, destTiploc string) (current []string, history []api_types.GeminiSnapshot) {
+	filtered := rows
 	if originTiploc != "" && destTiploc != "" {
-		routeClause = `
-		  AND (
-		    (ga.train_origin_tiploc = $3 AND ga.train_dest_tiploc = $4)
-		     OR
-		    (ga.allocation_origin_tiploc = $3 AND ga.allocation_dest_tiploc = $4)
-		  )
-		`
-		args = append(args, originTiploc, destTiploc)
+		filtered = make([]geminiAllocationRow, 0, len(rows))
+		for _, r := range rows {
+			trainMatch := r.TrainOriginTiploc.Valid && r.TrainOriginTiploc.String == originTiploc &&
+				r.TrainDestTiploc.Valid && r.TrainDestTiploc.String == destTiploc
+			allocMatch := r.AllocationOriginTiploc.Valid && r.AllocationOriginTiploc.String == originTiploc &&
+				r.AllocationDestTiploc.Valid && r.AllocationDestTiploc.String == destTiploc
+			if trainMatch || allocMatch {
+				filtered = append(filtered, r)
+			}
+		}
 	}
-
-	query := fmt.Sprintf(`
-		SELECT
-			ga.resource_group_id,
-			ga.message_identifier,
-			COALESCE(
-				ga.message_date_time,
-				gm.message_date_time,
-				gm.received_at,
-				ga.created_at
-			) AS effective_message_time
-		FROM gemini_allocation ga
-		LEFT JOIN gemini_message gm
-		  ON ga.message_identifier = gm.message_identifier
-		WHERE ga.operational_train_number = $1
-		  AND ga.start_date = $2
-		%s
-		ORDER BY effective_message_time ASC
-	`, routeClause)
-
-	rows, err := dc.pg.Query(context.Background(), query, args...)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
 
 	type snapshotKey struct {
 		Identifier string
 		Time       time.Time
 	}
-
 	snapshotsMap := make(map[snapshotKey]map[string]struct{})
-
-	for rows.Next() {
-		var rgID string
-		var msgID sql.NullString
-		var effectiveTime time.Time
-		if err := rows.Scan(&rgID, &msgID, &effectiveTime); err != nil {
-			return nil, nil, err
-		}
-
-		// message_date_time may be NULL for older ingested rows if parsing failed.
-		// Use COALESCE(..., received_at, created_at) so we still get ordering + grouping.
-		if rgID == "" || !msgID.Valid {
+	for _, r := range filtered {
+		if r.ResourceGroupID == "" || !r.MessageIdentifier.Valid {
 			continue
 		}
-
-		effectiveTime = effectiveTime.UTC()
-		key := snapshotKey{
-			Identifier: msgID.String,
-			Time:       effectiveTime,
-		}
+		key := snapshotKey{r.MessageIdentifier.String, r.EffectiveTime.UTC()}
 		if _, ok := snapshotsMap[key]; !ok {
 			snapshotsMap[key] = make(map[string]struct{})
 		}
-		snapshotsMap[key][rgID] = struct{}{}
+		snapshotsMap[key][r.ResourceGroupID] = struct{}{}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
-	}
-
 	if len(snapshotsMap) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 
-	// Convert map to ordered slice
 	type kv struct {
 		Key  snapshotKey
 		Vals []string
@@ -860,10 +1277,149 @@ func (dc *DataClient) GetGeminiForService(
 			ResourceGroupIds: &vals,
 		})
 	}
-
-	// Current = resource groups from latest snapshot
 	if last := history[len(history)-1].ResourceGroupIds; last != nil {
 		current = *last
+	}
+	return current, history
+}
+
+// GetGeminiForServices enriches a slice of services with current Gemini resource groups in a
+// single batched query instead of one query per service. History is not populated for list views.
+func (dc *DataClient) GetGeminiForServices(services []api_types.ServiceResponse, date time.Time) {
+	if len(services) == 0 {
+		return
+	}
+
+	signallingIDs := make([]string, 0, len(services))
+	idSet := make(map[string]bool)
+	for _, svc := range services {
+		if !idSet[svc.SignallingId] {
+			idSet[svc.SignallingId] = true
+			signallingIDs = append(signallingIDs, svc.SignallingId)
+		}
+	}
+
+	rows, err := dc.pg.Query(context.Background(), `
+		SELECT
+			ga.operational_train_number,
+			ga.resource_group_id,
+			ga.message_identifier,
+			ga.train_origin_tiploc,
+			ga.train_dest_tiploc,
+			ga.allocation_origin_tiploc,
+			ga.allocation_dest_tiploc,
+			COALESCE(
+				ga.message_date_time,
+				gm.message_date_time,
+				gm.received_at,
+				ga.created_at
+			) AS effective_message_time
+		FROM gemini_allocation ga
+		LEFT JOIN gemini_message gm ON ga.message_identifier = gm.message_identifier
+		WHERE ga.operational_train_number = ANY($1)
+		  AND ga.start_date = $2
+		ORDER BY ga.operational_train_number, effective_message_time ASC
+	`, signallingIDs, date)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	bySignallingID := make(map[string][]geminiAllocationRow)
+	for rows.Next() {
+		var opTrainNum string
+		var r geminiAllocationRow
+		if err := rows.Scan(
+			&opTrainNum,
+			&r.ResourceGroupID,
+			&r.MessageIdentifier,
+			&r.TrainOriginTiploc,
+			&r.TrainDestTiploc,
+			&r.AllocationOriginTiploc,
+			&r.AllocationDestTiploc,
+			&r.EffectiveTime,
+		); err != nil {
+			continue
+		}
+		r.EffectiveTime = r.EffectiveTime.UTC()
+		bySignallingID[opTrainNum] = append(bySignallingID[opTrainNum], r)
+	}
+	if rows.Err() != nil {
+		return
+	}
+
+	for i := range services {
+		allocRows := bySignallingID[services[i].SignallingId]
+		if len(allocRows) == 0 {
+			continue
+		}
+		originTiploc, destTiploc := routeTiplocs(services[i])
+		current, _ := buildGeminiResult(allocRows, originTiploc, destTiploc)
+		if len(current) > 0 {
+			currentCopy := current
+			services[i].GeminiResourceGroups = &currentCopy
+		}
+	}
+}
+
+// GetGeminiForService fetches current and historical Gemini allocations for a service by signalling ID and date.
+// Gemini's OperationalTrainNumber matches the operational train ID (signalling_id), not the internal headcode.
+func (dc *DataClient) GetGeminiForService(
+	signallingID string,
+	date time.Time,
+	originTiploc string,
+	destTiploc string,
+) (current []string, history []api_types.GeminiSnapshot, err error) {
+	rows, err := dc.pg.Query(context.Background(), `
+		SELECT
+			ga.resource_group_id,
+			ga.message_identifier,
+			ga.train_origin_tiploc,
+			ga.train_dest_tiploc,
+			ga.allocation_origin_tiploc,
+			ga.allocation_dest_tiploc,
+			COALESCE(
+				ga.message_date_time,
+				gm.message_date_time,
+				gm.received_at,
+				ga.created_at
+			) AS effective_message_time
+		FROM gemini_allocation ga
+		LEFT JOIN gemini_message gm
+		  ON ga.message_identifier = gm.message_identifier
+		WHERE ga.operational_train_number = $1
+		  AND ga.start_date = $2
+		ORDER BY effective_message_time ASC
+	`, signallingID, date)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	var allocRows []geminiAllocationRow
+	for rows.Next() {
+		var r geminiAllocationRow
+		if err := rows.Scan(
+			&r.ResourceGroupID,
+			&r.MessageIdentifier,
+			&r.TrainOriginTiploc,
+			&r.TrainDestTiploc,
+			&r.AllocationOriginTiploc,
+			&r.AllocationDestTiploc,
+			&r.EffectiveTime,
+		); err != nil {
+			return nil, nil, err
+		}
+		r.EffectiveTime = r.EffectiveTime.UTC()
+		allocRows = append(allocRows, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	current, history = buildGeminiResult(allocRows, originTiploc, destTiploc)
+	if current == nil && history == nil {
+		return nil, nil, nil
 	}
 	return current, history, nil
 }
@@ -1019,68 +1575,113 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 		return
 	}
 
+	t0 := time.Now()
 	runDate := utils.FormatRunDate(date)
 
-	trainUIDs := make(map[string]bool)
+	// Collect unique trainUIDs in a stable order so MGET indices correlate correctly.
+	trainUIDs := make([]string, 0, len(services))
+	uidSet := make(map[string]bool)
 	for i := range services {
-		if services[i].TrainUid != "" {
-			trainUIDs[strings.TrimSpace(services[i].TrainUid)] = true
+		uid := strings.TrimSpace(services[i].TrainUid)
+		if uid != "" && !uidSet[uid] {
+			uidSet[uid] = true
+			trainUIDs = append(trainUIDs, uid)
 		}
 	}
-	journeys := make(map[string]types.TrainJourney)
-	journeyMutex := &sync.Mutex{}
-	journeyWg := &sync.WaitGroup{}
-	semaphore := make(chan struct{}, 50)
 
-	for trainUID := range trainUIDs {
-		journeyWg.Add(1)
-		go func(uid string) {
-			defer journeyWg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
+	journeys := make(map[string]types.TrainJourney, len(trainUIDs))
+	var missedUIDs []string
 
-			journey, err := utils.LoadTrainJourney(context.Background(), dc.pg, dc.rdb, uid, runDate)
-			if err == nil {
-				journeyMutex.Lock()
-				journeys[uid] = journey
-				journeyMutex.Unlock()
+	if len(trainUIDs) > 0 {
+		// Single MGET round-trip for all schedule keys.
+		scheduleKeys := make([]string, len(trainUIDs))
+		for i, uid := range trainUIDs {
+			scheduleKeys[i] = utils.BuildScheduleKey(uid, runDate)
+		}
+
+		mgetResults, err := dc.rdb.MGet(context.Background(), scheduleKeys...).Result()
+		if err == nil {
+			for i, raw := range mgetResults {
+				if raw == nil {
+					missedUIDs = append(missedUIDs, trainUIDs[i])
+					continue
+				}
+				str, ok := raw.(string)
+				if !ok {
+					missedUIDs = append(missedUIDs, trainUIDs[i])
+					continue
+				}
+				var journey types.TrainJourney
+				if json.Unmarshal([]byte(str), &journey) == nil {
+					journeys[trainUIDs[i]] = journey
+				} else {
+					missedUIDs = append(missedUIDs, trainUIDs[i])
+				}
 			}
-		}(trainUID)
+		} else {
+			missedUIDs = trainUIDs
+		}
 	}
-	journeyWg.Wait()
+
+	// Batch DB fallback: one schedule query + one locations query for all cache misses.
+	if len(missedUIDs) > 0 {
+		loaded, err := utils.LoadTrainJourneysBatch(context.Background(), dc.pg, dc.rdb, missedUIDs, runDate)
+		if err == nil {
+			for uid, journey := range loaded {
+				journeys[uid] = journey
+			}
+		}
+	}
+
+	if dc.logger != nil {
+		hits := len(journeys)
+		dc.logger.Infow("services: realtime journey load",
+			"duration_ms", time.Since(t0).Milliseconds(),
+			"total_uids", len(trainUIDs),
+			"cache_hits", hits,
+			"cache_misses", len(missedUIDs),
+		)
+	}
 
 	servicesWithJourneys := make([]int, 0, len(journeys))
 	for i := range services {
-		trainUid := strings.TrimSpace(services[i].TrainUid)
-		if _, hasJourney := journeys[trainUid]; hasJourney {
+		uid := strings.TrimSpace(services[i].TrainUid)
+		if _, has := journeys[uid]; has {
 			servicesWithJourneys = append(servicesWithJourneys, i)
 		}
 	}
 
-	tiplocs := make([]string, 0, 300) // Preallocate with estimated size
-	tiplocSet := make(map[string]bool)
+	// Build tiploc→stanox from Location.Stanox populated by fetchScheduleLocations (no extra DB
+	// query needed for tiplocs that already have stanox set). Only fall back to Postgres for gaps.
+	tiplocToStanox := make(map[string]string)
+	var missingTiplocs []string
+	missingTiplocSet := make(map[string]bool)
 
 	for _, idx := range servicesWithJourneys {
 		for j := range services[idx].Locations {
-			for _, tiplocCode := range services[idx].Locations[j].Location.TiplocCodes {
-				if !tiplocSet[tiplocCode] {
-					tiplocSet[tiplocCode] = true
-					tiplocs = append(tiplocs, tiplocCode)
+			loc := &services[idx].Locations[j]
+			if loc.Location.Stanox != "" {
+				for _, tc := range loc.Location.TiplocCodes {
+					tiplocToStanox[tc] = loc.Location.Stanox
+				}
+			} else {
+				for _, tc := range loc.Location.TiplocCodes {
+					if tiplocToStanox[tc] == "" && !missingTiplocSet[tc] {
+						missingTiplocSet[tc] = true
+						missingTiplocs = append(missingTiplocs, tc)
+					}
 				}
 			}
 		}
 	}
 
-	tiplocToStanox := make(map[string]string, len(tiplocs))
-
-	if len(tiplocs) > 0 {
+	if len(missingTiplocs) > 0 {
 		rows, err := dc.pg.Query(context.Background(), `
 			SELECT tiploc_code, stanox
 			FROM tiploc
 			WHERE tiploc_code = ANY($1) AND stanox IS NOT NULL
-		`, tiplocs)
+		`, missingTiplocs)
 		if err == nil {
-			defer rows.Close()
 			for rows.Next() {
 				var tiplocCode, stanox string
 				if err := rows.Scan(&tiplocCode, &stanox); err == nil {
@@ -1091,49 +1692,87 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 		}
 	}
 
+	// Collect activation keys and resolve in a single MGET call.
+	type pendingActivation struct {
+		serviceIdx int
+		key        string
+		useTrainID bool
+		trainID    string
+	}
+	var pending []pendingActivation
+
 	for _, idx := range servicesWithJourneys {
 		trainUid := strings.TrimSpace(services[idx].TrainUid)
 		journey := journeys[trainUid]
 
-		var activationTrainID string
-		var activationTime string
-
 		if journey.TrainID != "" {
-			activationTrainID = journey.TrainID
-			if journey.ActivationTime == "" {
-				activationKey := utils.BuildActivationKey(journey.TrainID)
-				activationData, err := dc.rdb.Get(context.Background(), activationKey).Result()
-				if err == nil {
-					var activation map[string]string
-					if json.Unmarshal([]byte(activationData), &activation) == nil {
-						if aTime, ok := activation["activation_time"]; ok {
-							activationTime = aTime
-						}
-					}
-				}
+			if journey.ActivationTime != "" {
+				// Already cached in the journey; set directly.
+				trainID := journey.TrainID
+				activationTime := journey.ActivationTime
+				services[idx].TrustId = &trainID
+				services[idx].ActivationTime = &activationTime
 			} else {
-				activationTime = journey.ActivationTime
+				pending = append(pending, pendingActivation{
+					serviceIdx: idx,
+					key:        utils.BuildActivationKey(journey.TrainID),
+					useTrainID: true,
+					trainID:    journey.TrainID,
+				})
 			}
 		} else {
-			uidKey := fmt.Sprintf("activation:uid:%s", trainUid)
-			activationData, err := dc.rdb.Get(context.Background(), uidKey).Result()
-			if err == nil {
+			pending = append(pending, pendingActivation{
+				serviceIdx: idx,
+				key:        fmt.Sprintf("activation:uid:%s", trainUid),
+				useTrainID: false,
+			})
+		}
+	}
+
+	if len(pending) > 0 {
+		activationKeys := make([]string, len(pending))
+		for i, p := range pending {
+			activationKeys[i] = p.key
+		}
+		mgetResults, err := dc.rdb.MGet(context.Background(), activationKeys...).Result()
+		if err == nil {
+			for i, raw := range mgetResults {
+				if raw == nil {
+					continue
+				}
+				str, ok := raw.(string)
+				if !ok {
+					continue
+				}
+				p := pending[i]
 				var activation map[string]string
-				if json.Unmarshal([]byte(activationData), &activation) == nil {
-					activationTrainID = activation["train_id"]
-					activationTime = activation["activation_time"]
+				if json.Unmarshal([]byte(str), &activation) != nil {
+					continue
+				}
+				if p.useTrainID {
+					trainID := p.trainID
+					services[p.serviceIdx].TrustId = &trainID
+					if aTime, ok := activation["activation_time"]; ok {
+						services[p.serviceIdx].ActivationTime = &aTime
+					}
+				} else {
+					if tID, ok := activation["train_id"]; ok {
+						services[p.serviceIdx].TrustId = &tID
+					}
+					if aTime, ok := activation["activation_time"]; ok {
+						services[p.serviceIdx].ActivationTime = &aTime
+					}
 				}
 			}
 		}
+	}
 
-		if activationTrainID != "" {
-			services[idx].TrustId = &activationTrainID
-		}
-		if activationTime != "" {
-			services[idx].ActivationTime = &activationTime
-		}
+	// Match journey stops to service locations and attach actual times.
+	for _, idx := range servicesWithJourneys {
+		trainUid := strings.TrimSpace(services[idx].TrainUid)
+		journey := journeys[trainUid]
 
-		stanoxToStop := make(map[string]types.Stop)
+		stanoxToStop := make(map[string]types.Stop, len(journey.Stops))
 		for _, stop := range journey.Stops {
 			stanoxToStop[stop.Stanox] = stop
 		}
@@ -1177,5 +1816,9 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 				}
 			}
 		}
+	}
+
+	if dc.logger != nil {
+		dc.logger.Infow("services: AddRealtimeData total", "duration_ms", time.Since(t0).Milliseconds())
 	}
 }
