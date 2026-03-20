@@ -326,12 +326,37 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ScheduleLocation"
+        gemini_resource_groups:
+          type: array
+          description: "Current Gemini resource group IDs (train numbers) allocated to this service for the requested date"
+          items:
+            type: string
+          example: ["158843", "156406"]
+        gemini_history:
+          type: array
+          description: "Time-ordered snapshots of Gemini allocations for this service, used to understand formation changes over the route"
+          items:
+            $ref: "#/components/schemas/GeminiSnapshot"
       required:
         - id
         - train_uid
         - signalling_id
         - headcode
         - locations
+    GeminiSnapshot:
+      type: object
+      properties:
+        message_date_time:
+          type: string
+          format: date-time
+          description: "Timestamp of the Gemini message that updated allocations"
+          example: "2025-10-11T05:30:00Z"
+        resource_group_ids:
+          type: array
+          description: "Resource group IDs (train numbers) allocated to this service in this snapshot"
+          items:
+            type: string
+          example: ["158843"]
     Operator:
       type: object
       properties:

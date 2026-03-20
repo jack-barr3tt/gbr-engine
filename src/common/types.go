@@ -127,6 +127,15 @@ type ServiceQueryResponse struct {
 	Services   []ServiceResponse `json:"services"`
 }
 
+// GeminiSnapshot defines a single Gemini allocation snapshot for a service.
+type GeminiSnapshot struct {
+	// MessageDateTime Timestamp of the Gemini message that updated allocations
+	MessageDateTime *string `json:"message_date_time,omitempty"`
+
+	// ResourceGroupIds Resource group IDs (train numbers) allocated in this snapshot
+	ResourceGroupIds []string `json:"resource_group_ids,omitempty"`
+}
+
 // ServiceResponse defines model for ServiceResponse.
 type ServiceResponse struct {
 	// ActivationTime TRUST activation timestamp (if activated)
@@ -145,6 +154,12 @@ type ServiceResponse struct {
 
 	// TrustId TRUST train ID (if activated)
 	TrustId *string `json:"trust_id,omitempty"`
+
+	// GeminiResourceGroups Current Gemini resource group IDs (train numbers) allocated to this service
+	GeminiResourceGroups []string `json:"gemini_resource_groups,omitempty"`
+
+	// GeminiHistory Time-ordered snapshots of Gemini allocations for this service
+	GeminiHistory []GeminiSnapshot `json:"gemini_history,omitempty"`
 }
 
 // GetServiceParams defines parameters for GetService.

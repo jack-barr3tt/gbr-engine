@@ -7,3 +7,4 @@ env "local" {
     dir = "file://migrations"
   }
 }
+

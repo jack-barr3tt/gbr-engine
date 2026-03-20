@@ -461,6 +461,22 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 		services = filterServicesByTargetDate(services, filters)
 	}
 
+	// Best-effort Gemini enrichment for list view: use target date from filters if available, otherwise today.
+	if len(services) > 0 {
+		targetDate := queryDateFromFilters(filters)
+		if targetDate == nil {
+			now := time.Now().UTC()
+			targetDate = &now
+		}
+
+		for i := range services {
+			current, _, err := dc.GetGeminiForService(services[i].SignallingId, *targetDate)
+			if err == nil && len(current) > 0 {
+				services[i].GeminiResourceGroups = current
+			}
+		}
+	}
+
 	return &ServiceQueryResult{
 		Services:     services,
 		TotalResults: totalResults,
@@ -495,6 +511,15 @@ func (dc *DataClient) GetServiceByUID(uid string, date *time.Time) (*api_types.S
 		return nil, err
 	}
 
+	// Enrich with Gemini allocations when a date is available.
+	if date != nil {
+		current, history, err := dc.GetGeminiForService(service.SignallingId, *date)
+		if err == nil {
+			service.GeminiResourceGroups = current
+			service.GeminiHistory = history
+		}
+	}
+
 	return service, nil
 }
 
@@ -521,6 +546,12 @@ func (dc *DataClient) GetServiceByID(id int, date time.Time) (*api_types.Service
 
 	if err := dc.enrichServiceWithLocationsAndRealtime(service, &date); err != nil {
 		return nil, err
+	}
+
+	// Enrich with Gemini allocations for this specific date.
+	if current, history, err := dc.GetGeminiForService(service.SignallingId, date); err == nil {
+		service.GeminiResourceGroups = current
+		service.GeminiHistory = history
 	}
 
 	return service, nil
@@ -666,6 +697,87 @@ func filterServicesByTargetDate(services []api_types.ServiceResponse, filters Se
 	}
 
 	return filtered
+}
+
+// GetGeminiForService fetches current and historical Gemini allocations for a service by signalling ID and date.
+// Gemini's OperationalTrainNumber matches the operational train ID (signalling_id), not the internal headcode.
+func (dc *DataClient) GetGeminiForService(signallingID string, date time.Time) (current []string, history []api_types.GeminiSnapshot, err error) {
+	rows, err := dc.pg.Query(context.Background(), `
+		SELECT resource_group_id, message_identifier, message_date_time
+		FROM gemini_allocation
+		WHERE operational_train_number = $1
+		  AND start_date = $2
+		ORDER BY message_date_time ASC
+	`, signallingID, date)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	type snapshotKey struct {
+		Identifier string
+		Time       time.Time
+	}
+
+	snapshotsMap := make(map[snapshotKey]map[string]struct{})
+
+	for rows.Next() {
+		var rgID string
+		var msgID sql.NullString
+		var msgTime sql.NullTime
+		if err := rows.Scan(&rgID, &msgID, &msgTime); err != nil {
+			return nil, nil, err
+		}
+		if rgID == "" || !msgTime.Valid {
+			continue
+		}
+		key := snapshotKey{
+			Identifier: msgID.String,
+			Time:       msgTime.Time,
+		}
+		if _, ok := snapshotsMap[key]; !ok {
+			snapshotsMap[key] = make(map[string]struct{})
+		}
+		snapshotsMap[key][rgID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	if len(snapshotsMap) == 0 {
+		return nil, nil, nil
+	}
+
+	// Convert map to ordered slice
+	type kv struct {
+		Key  snapshotKey
+		Vals []string
+	}
+	tmp := make([]kv, 0, len(snapshotsMap))
+	for k, set := range snapshotsMap {
+		var ids []string
+		for id := range set {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		tmp = append(tmp, kv{Key: k, Vals: ids})
+	}
+	sort.Slice(tmp, func(i, j int) bool {
+		return tmp[i].Key.Time.Before(tmp[j].Key.Time)
+	})
+
+	history = make([]api_types.GeminiSnapshot, 0, len(tmp))
+	for _, entry := range tmp {
+		tStr := entry.Key.Time.UTC().Format(time.RFC3339)
+		history = append(history, api_types.GeminiSnapshot{
+			MessageDateTime: &tStr,
+			ResourceGroupIds: entry.Vals,
+		})
+	}
+
+	// Current = resource groups from latest snapshot
+	current = history[len(history)-1].ResourceGroupIds
+	return current, history, nil
 }
 
 // fetchScheduleLocations fetches all schedule locations for the given schedule IDs

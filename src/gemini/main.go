@@ -22,6 +22,12 @@ func main() {
 	defer utils.SyncLogger()
 	log := utils.GetLogger()
 
+	pg, err := utils.NewPostgresConnection()
+	if err != nil {
+		log.Fatalw("failed to connect to Postgres", "error", err)
+	}
+	defer pg.Close()
+
 	brokers := strings.TrimSpace(os.Getenv("GEMINI_KAFKA_BROKERS"))
 	topic := strings.TrimSpace(os.Getenv("GEMINI_KAFKA_TOPIC"))
 	group := strings.TrimSpace(os.Getenv("GEMINI_KAFKA_GROUP"))
@@ -81,6 +87,10 @@ func main() {
 		if err != nil {
 			log.Warnw("parse", "error", err, "partition", msg.Partition, "offset", msg.Offset)
 		} else {
+			toc := headerValue(msg.Headers, "toc")
+			if err := StoreConsistMessage(ctx, pg, parsed, toc); err != nil {
+				log.Warnw("store", "error", err, "partition", msg.Partition, "offset", msg.Offset)
+			}
 			logConsist(parsed)
 		}
 
@@ -160,4 +170,13 @@ func splitBrokers(s string) []string {
 		}
 	}
 	return out
+}
+
+func headerValue(headers []kafka.Header, key string) string {
+	for _, h := range headers {
+		if strings.EqualFold(h.Key, key) {
+			return string(h.Value)
+		}
+	}
+	return ""
 }
