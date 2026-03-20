@@ -16,6 +16,15 @@ type ErrorResponse struct {
 	Stack   *string `json:"stack,omitempty"`
 }
 
+// GeminiSnapshot defines model for GeminiSnapshot.
+type GeminiSnapshot struct {
+	// MessageDateTime Timestamp of the Gemini message that updated allocations
+	MessageDateTime *time.Time `json:"message_date_time,omitempty"`
+
+	// ResourceGroupIds Resource group IDs (train numbers) allocated to this service in this snapshot
+	ResourceGroupIds *[]string `json:"resource_group_ids,omitempty"`
+}
+
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
 	Status  string `json:"status"`
@@ -97,6 +106,9 @@ type ScheduleLocation struct {
 
 // ServiceQueryRequest defines model for ServiceQueryRequest.
 type ServiceQueryRequest struct {
+	// Date Date to filter services by (used for headcode-only searches)
+	Date *openapi_types.Date `json:"date,omitempty"`
+
 	// Headcode Filter by headcode
 	Headcode *string `json:"headcode,omitempty"`
 
@@ -127,42 +139,33 @@ type ServiceQueryResponse struct {
 	Services   []ServiceResponse `json:"services"`
 }
 
-// GeminiSnapshot defines a single Gemini allocation snapshot for a service.
-type GeminiSnapshot struct {
-	// MessageDateTime Timestamp of the Gemini message that updated allocations
-	MessageDateTime *string `json:"message_date_time,omitempty"`
-
-	// ResourceGroupIds Resource group IDs (train numbers) allocated in this snapshot
-	ResourceGroupIds []string `json:"resource_group_ids,omitempty"`
-}
-
 // ServiceResponse defines model for ServiceResponse.
 type ServiceResponse struct {
 	// ActivationTime TRUST activation timestamp (if activated)
 	ActivationTime *string `json:"activation_time,omitempty"`
 
 	// Cancelled Whether this service is cancelled by an STP cancellation record
-	Cancelled         *bool               `json:"cancelled,omitempty"`
-	Headcode          string              `json:"headcode"`
-	Id                int                 `json:"id"`
-	Locations         []ScheduleLocation  `json:"locations"`
-	Operator          *Operator           `json:"operator,omitempty"`
-	ScheduleDaysRuns  *string             `json:"schedule_days_runs,omitempty"`
-	ScheduleEndDate   *openapi_types.Date `json:"schedule_end_date,omitempty"`
-	ScheduleStartDate *openapi_types.Date `json:"schedule_start_date,omitempty"`
-	SignallingId      string              `json:"signalling_id"`
-	TrainCategory     *string             `json:"train_category,omitempty"`
-	TrainStatus       *string             `json:"train_status,omitempty"`
-	TrainUid          string              `json:"train_uid"`
+	Cancelled *bool `json:"cancelled,omitempty"`
+
+	// GeminiHistory Time-ordered snapshots of Gemini allocations for this service, used to understand formation changes over the route
+	GeminiHistory *[]GeminiSnapshot `json:"gemini_history,omitempty"`
+
+	// GeminiResourceGroups Current Gemini resource group IDs (train numbers) allocated to this service for the requested date
+	GeminiResourceGroups *[]string           `json:"gemini_resource_groups,omitempty"`
+	Headcode             string              `json:"headcode"`
+	Id                   int                 `json:"id"`
+	Locations            []ScheduleLocation  `json:"locations"`
+	Operator             *Operator           `json:"operator,omitempty"`
+	ScheduleDaysRuns     *string             `json:"schedule_days_runs,omitempty"`
+	ScheduleEndDate      *openapi_types.Date `json:"schedule_end_date,omitempty"`
+	ScheduleStartDate    *openapi_types.Date `json:"schedule_start_date,omitempty"`
+	SignallingId         string              `json:"signalling_id"`
+	TrainCategory        *string             `json:"train_category,omitempty"`
+	TrainStatus          *string             `json:"train_status,omitempty"`
+	TrainUid             string              `json:"train_uid"`
 
 	// TrustId TRUST train ID (if activated)
 	TrustId *string `json:"trust_id,omitempty"`
-
-	// GeminiResourceGroups Current Gemini resource group IDs (train numbers) allocated to this service
-	GeminiResourceGroups []string `json:"gemini_resource_groups,omitempty"`
-
-	// GeminiHistory Time-ordered snapshots of Gemini allocations for this service
-	GeminiHistory []GeminiSnapshot `json:"gemini_history,omitempty"`
 }
 
 // GetServiceParams defines parameters for GetService.

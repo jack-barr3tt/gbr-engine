@@ -33,6 +33,12 @@ func (s *APIServer) QueryServices(c *fiber.Ctx) error {
 		filters.OperatorCode = req.OperatorCode
 	}
 
+	if req.Date != nil {
+		// `date` is a schedule date used for headcode-only searches.
+		dt := req.Date.Time
+		filters.Date = &dt
+	}
+
 	filters.Offset = 0
 	if req.Offset != nil && *req.Offset >= 0 {
 		if *req.Offset > MaxOffset {
@@ -101,6 +107,8 @@ func (s *APIServer) QueryServices(c *fiber.Ctx) error {
 	realtimeDate := time.Now()
 	if len(filters.PassesThrough) > 0 && filters.PassesThrough[0].TimeFrom != nil {
 		realtimeDate = *filters.PassesThrough[0].TimeFrom
+	} else if filters.Date != nil {
+		realtimeDate = *filters.Date
 	}
 	s.Data.AddRealtimeData(services, realtimeDate)
 

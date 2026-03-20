@@ -20,6 +20,7 @@ type ServiceFilters struct {
 	Headcode      *string
 	OperatorCode  *string
 	PassesThrough []LocationFilter
+	Date          *time.Time
 	Offset        int
 	Limit         int
 }
@@ -73,6 +74,14 @@ func queryDateFromFilters(filters ServiceFilters) *time.Time {
 			return &date
 		}
 	}
+
+	// `date` is an explicit schedule date used for headcode-only searches.
+	// Prefer any time filters from `passes_through` when present.
+	if filters.Date != nil {
+		date := startOfDay(*filters.Date)
+		return &date
+	}
+
 	return nil
 }
 
@@ -180,6 +189,17 @@ func (dc *DataClient) buildServiceFilter(filters ServiceFilters) (string, []inte
 				queryDate = &queryDateValue
 			}
 		}
+	}
+
+	// For headcode-only searches we may not have time filters from `passes_through`.
+	// In that case, fall back to the explicit `date` parameter for schedule filtering
+	// and Gemini enrichment.
+	if queryDate == nil && filters.Date != nil {
+		t := startOfDay(*filters.Date)
+		minDate = t
+		maxDate = t
+		queryDateValue = t
+		queryDate = &queryDateValue
 	}
 
 	if queryDate != nil {
@@ -472,7 +492,8 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 		for i := range services {
 			current, _, err := dc.GetGeminiForService(services[i].SignallingId, *targetDate)
 			if err == nil && len(current) > 0 {
-				services[i].GeminiResourceGroups = current
+				currentCopy := current
+				services[i].GeminiResourceGroups = &currentCopy
 			}
 		}
 	}
@@ -515,8 +536,10 @@ func (dc *DataClient) GetServiceByUID(uid string, date *time.Time) (*api_types.S
 	if date != nil {
 		current, history, err := dc.GetGeminiForService(service.SignallingId, *date)
 		if err == nil {
-			service.GeminiResourceGroups = current
-			service.GeminiHistory = history
+			currentCopy := current
+			historyCopy := history
+			service.GeminiResourceGroups = &currentCopy
+			service.GeminiHistory = &historyCopy
 		}
 	}
 
@@ -550,8 +573,10 @@ func (dc *DataClient) GetServiceByID(id int, date time.Time) (*api_types.Service
 
 	// Enrich with Gemini allocations for this specific date.
 	if current, history, err := dc.GetGeminiForService(service.SignallingId, date); err == nil {
-		service.GeminiResourceGroups = current
-		service.GeminiHistory = history
+		currentCopy := current
+		historyCopy := history
+		service.GeminiResourceGroups = &currentCopy
+		service.GeminiHistory = &historyCopy
 	}
 
 	return service, nil
@@ -768,15 +793,18 @@ func (dc *DataClient) GetGeminiForService(signallingID string, date time.Time) (
 
 	history = make([]api_types.GeminiSnapshot, 0, len(tmp))
 	for _, entry := range tmp {
-		tStr := entry.Key.Time.UTC().Format(time.RFC3339)
+		t := entry.Key.Time.UTC()
+		vals := entry.Vals
 		history = append(history, api_types.GeminiSnapshot{
-			MessageDateTime: &tStr,
-			ResourceGroupIds: entry.Vals,
+			MessageDateTime:  &t,
+			ResourceGroupIds: &vals,
 		})
 	}
 
 	// Current = resource groups from latest snapshot
-	current = history[len(history)-1].ResourceGroupIds
+	if last := history[len(history)-1].ResourceGroupIds; last != nil {
+		current = *last
+	}
 	return current, history, nil
 }
 
