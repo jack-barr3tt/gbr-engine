@@ -317,10 +317,12 @@ func scanServiceRowWithVisitTime(scanner interface {
 	service.ScheduleEndDate = &endDate
 	service.ScheduleDaysRuns = &scheduleDaysRuns
 
-	if atocCode.Valid && tocName.Valid {
+	operatorCode := strings.TrimSpace(atocCode.String)
+	operatorName := resolveOperatorName(tocName)
+	if atocCode.Valid && operatorCode != "" && operatorName != "" {
 		service.Operator = &api_types.Operator{
-			Code: atocCode.String,
-			Name: tocName.String,
+			Code: operatorCode,
+			Name: operatorName,
 		}
 	}
 
@@ -378,10 +380,12 @@ func scanServiceRow(scanner interface {
 	service.ScheduleEndDate = &endDate
 	service.ScheduleDaysRuns = &scheduleDaysRuns
 
-	if atocCode.Valid && tocName.Valid {
+	operatorCode := strings.TrimSpace(atocCode.String)
+	operatorName := resolveOperatorName(tocName)
+	if atocCode.Valid && operatorCode != "" && operatorName != "" {
 		service.Operator = &api_types.Operator{
-			Code: atocCode.String,
-			Name: tocName.String,
+			Code: operatorCode,
+			Name: operatorName,
 		}
 	}
 
@@ -389,6 +393,70 @@ func scanServiceRow(scanner interface {
 	service.Cancelled = &cancelled
 
 	return &service, nil
+}
+
+func resolveOperatorName(tocName sql.NullString) string {
+	if tocName.Valid {
+		trimmed := strings.TrimSpace(tocName.String)
+		normalized := strings.ToLower(trimmed)
+		if trimmed != "" && !strings.Contains(normalized, "unknown") && !strings.Contains(normalized, "unkown") {
+			return trimmed
+		}
+	}
+
+	return ""
+}
+
+func isUnknownOperatorName(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	return normalized == "" || strings.Contains(normalized, "unknown") || strings.Contains(normalized, "unkown")
+}
+
+func (dc *DataClient) resolveTOCNames(codes []string) map[string]string {
+	if len(codes) == 0 {
+		return map[string]string{}
+	}
+
+	rows, err := dc.pg.Query(context.Background(), `
+		SELECT code, name
+		FROM (
+			SELECT DISTINCT UPPER(TRIM(c.code)) AS code,
+				COALESCE(
+					CASE
+						WHEN LOWER(TRIM(toc.name)) LIKE '%unknown%' OR LOWER(TRIM(toc.name)) LIKE '%unkown%' THEN NULL
+						ELSE NULLIF(TRIM(toc.name), '')
+					END,
+					btoc.description
+				) AS name
+			FROM (
+				SELECT DISTINCT UPPER(TRIM(unnest($1::text[]))) AS code
+			) c
+			LEFT JOIN reference_toc toc ON UPPER(TRIM(toc.code)) = c.code
+			LEFT JOIN LATERAL (
+				SELECT r.description
+				FROM bplan_ref r
+				WHERE r.category = 'TOC'
+				  AND UPPER(TRIM(r.subcode)) = c.code
+				  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+				ORDER BY r.id
+				LIMIT 1
+			) btoc ON TRUE
+		) resolved
+		WHERE name IS NOT NULL
+	`, codes)
+	if err != nil {
+		return map[string]string{}
+	}
+	defer rows.Close()
+
+	resolved := make(map[string]string, len(codes))
+	for rows.Next() {
+		var code, name string
+		if rows.Scan(&code, &name) == nil {
+			resolved[code] = name
+		}
+	}
+	return resolved
 }
 
 func (dc *DataClient) enrichServiceWithLocationsAndRealtime(service *api_types.ServiceResponse, date *time.Time) error {
@@ -1020,7 +1088,13 @@ func (dc *DataClient) GetServiceByUID(uid string, date *time.Time) (*api_types.S
 	query := `
 		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
 			   s.train_category, btr.description AS train_category_description, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
-			   s.train_status, s.atoc_code, toc.name, s.stp_indicator
+			   s.train_status, s.atoc_code, COALESCE(
+			   	CASE
+			   		WHEN LOWER(TRIM(toc.name)) LIKE '%unknown%' OR LOWER(TRIM(toc.name)) LIKE '%unkown%' THEN NULL
+			   		ELSE NULLIF(TRIM(toc.name), '')
+			   	END,
+			   	btoc.description
+			   ), s.stp_indicator
 		FROM schedule s
 		LEFT JOIN LATERAL (
 			SELECT r.description
@@ -1031,7 +1105,16 @@ func (dc *DataClient) GetServiceByUID(uid string, date *time.Time) (*api_types.S
 			ORDER BY r.id
 			LIMIT 1
 		) btr ON TRUE
-		JOIN reference_toc toc ON s.atoc_code = toc.code
+		LEFT JOIN reference_toc toc ON s.atoc_code = toc.code
+		LEFT JOIN LATERAL (
+			SELECT r.description
+			FROM bplan_ref r
+			WHERE r.category = 'TOC'
+			  AND UPPER(TRIM(r.subcode)) = UPPER(TRIM(s.atoc_code))
+			  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+			ORDER BY r.id
+			LIMIT 1
+		) btoc ON TRUE
 		WHERE s.train_uid = $1
 	`
 
@@ -1072,7 +1155,13 @@ func (dc *DataClient) GetServiceByID(id int, date time.Time) (*api_types.Service
 	query := `
 		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
 			   s.train_category, btr.description AS train_category_description, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
-			   s.train_status, s.atoc_code, toc.name, s.stp_indicator
+			   s.train_status, s.atoc_code, COALESCE(
+			   	CASE
+			   		WHEN LOWER(TRIM(toc.name)) LIKE '%unknown%' OR LOWER(TRIM(toc.name)) LIKE '%unkown%' THEN NULL
+			   		ELSE NULLIF(TRIM(toc.name), '')
+			   	END,
+			   	btoc.description
+			   ), s.stp_indicator
 		FROM schedule s
 		LEFT JOIN LATERAL (
 			SELECT r.description
@@ -1083,7 +1172,16 @@ func (dc *DataClient) GetServiceByID(id int, date time.Time) (*api_types.Service
 			ORDER BY r.id
 			LIMIT 1
 		) btr ON TRUE
-		JOIN reference_toc toc ON s.atoc_code = toc.code
+		LEFT JOIN reference_toc toc ON s.atoc_code = toc.code
+		LEFT JOIN LATERAL (
+			SELECT r.description
+			FROM bplan_ref r
+			WHERE r.category = 'TOC'
+			  AND UPPER(TRIM(r.subcode)) = UPPER(TRIM(s.atoc_code))
+			  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+			ORDER BY r.id
+			LIMIT 1
+		) btoc ON TRUE
 		WHERE s.id = $1
 	`
 
@@ -1810,6 +1908,12 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 		}
 	}
 
+	type pendingOperator struct {
+		serviceIdx int
+		tocCode    string
+	}
+	var pendingOperators []pendingOperator
+
 	if len(pending) > 0 {
 		activationKeys := make([]string, len(pending))
 		for i, p := range pending {
@@ -1836,6 +1940,12 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 					if aTime, ok := activation["activation_time"]; ok {
 						services[p.serviceIdx].ActivationTime = &aTime
 					}
+					if tocID, ok := activation["toc_id"]; ok && strings.TrimSpace(tocID) != "" {
+						pendingOperators = append(pendingOperators, pendingOperator{
+							serviceIdx: p.serviceIdx,
+							tocCode:    strings.ToUpper(strings.TrimSpace(tocID)),
+						})
+					}
 				} else {
 					if tID, ok := activation["train_id"]; ok {
 						services[p.serviceIdx].TrustId = &tID
@@ -1843,6 +1953,38 @@ func (dc *DataClient) AddRealtimeData(services []api_types.ServiceResponse, date
 					if aTime, ok := activation["activation_time"]; ok {
 						services[p.serviceIdx].ActivationTime = &aTime
 					}
+					if tocID, ok := activation["toc_id"]; ok && strings.TrimSpace(tocID) != "" {
+						pendingOperators = append(pendingOperators, pendingOperator{
+							serviceIdx: p.serviceIdx,
+							tocCode:    strings.ToUpper(strings.TrimSpace(tocID)),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	if len(pendingOperators) > 0 {
+		tocSet := make(map[string]struct{}, len(pendingOperators))
+		tocCodes := make([]string, 0, len(pendingOperators))
+		for _, p := range pendingOperators {
+			if _, ok := tocSet[p.tocCode]; !ok {
+				tocSet[p.tocCode] = struct{}{}
+				tocCodes = append(tocCodes, p.tocCode)
+			}
+		}
+
+		tocNames := dc.resolveTOCNames(tocCodes)
+		for _, p := range pendingOperators {
+			name := tocNames[p.tocCode]
+			if name == "" {
+				continue
+			}
+			if services[p.serviceIdx].Operator == nil || isUnknownOperatorName(services[p.serviceIdx].Operator.Name) || strings.EqualFold(strings.TrimSpace(services[p.serviceIdx].Operator.Code), "ZZ") {
+				code := p.tocCode
+				services[p.serviceIdx].Operator = &api_types.Operator{
+					Code: code,
+					Name: name,
 				}
 			}
 		}

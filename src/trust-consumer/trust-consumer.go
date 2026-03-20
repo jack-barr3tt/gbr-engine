@@ -78,6 +78,9 @@ func processActivation(ctx context.Context, rdb *redis.Client, logger *zap.Sugar
 		"train_id":        trainID,
 		"activation_time": trust.ActualTimestamp,
 	}
+	if tocID := strings.TrimSpace(trust.TOCID); tocID != "" {
+		activationData["toc_id"] = tocID
+	}
 
 	jsonData, err := json.Marshal(activationData)
 	if err != nil {
