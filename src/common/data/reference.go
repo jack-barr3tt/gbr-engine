@@ -9,50 +9,58 @@ import (
 
 func (dc *DataClient) GetAllLocations() ([]api_types.Location, error) {
 	rows, err := dc.pg.Query(context.Background(), `
-		SELECT DISTINCT stanox, crs_code, description
-		FROM tiploc
-		WHERE stanox IS NOT NULL AND stanox != ''
-		ORDER BY description, crs_code
+		SELECT DISTINCT ON (t.stanox)
+			t.stanox,
+			t.crs_code,
+			COALESCE(NULLIF(br.description, ''), NULLIF(bl.name, ''), t.description) AS full_name
+		FROM tiploc t
+		LEFT JOIN bplan_loc bl
+		  ON UPPER(TRIM(t.tiploc_code)) = UPPER(TRIM(bl.tiploc))
+		LEFT JOIN LATERAL (
+			SELECT r.description
+			FROM bplan_ref r
+			WHERE UPPER(TRIM(r.subcode)) = UPPER(TRIM(bl.name))
+			  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+			ORDER BY CASE WHEN r.category = 'LOC' THEN 0 ELSE 1 END, r.id
+			LIMIT 1
+		) br ON TRUE
+		WHERE t.stanox IS NOT NULL AND t.stanox != ''
+		ORDER BY
+			t.stanox,
+			(NULLIF(br.description, '') IS NULL),
+			(NULLIF(bl.name, '') IS NULL),
+			t.crs_code
 	`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	locationsMap := make(map[string]*api_types.Location)
-
+	locations := make([]api_types.Location, 0)
 	for rows.Next() {
 		var stanox string
-		var crsCode, description sql.NullString
+		var crsCode, fullName sql.NullString
 
-		if err := rows.Scan(&stanox, &crsCode, &description); err != nil {
+		if err := rows.Scan(&stanox, &crsCode, &fullName); err != nil {
 			return nil, err
 		}
 
-		loc, exists := locationsMap[stanox]
-		if !exists {
-			loc = &api_types.Location{
-				Stanox:      stanox,
-				TiplocCodes: []string{},
-			}
-			locationsMap[stanox] = loc
+		loc := api_types.Location{
+			Stanox:      stanox,
+			TiplocCodes: []string{},
 		}
 
-		if crsCode.Valid && crsCode.String != "" && loc.Crs == nil {
+		if crsCode.Valid && crsCode.String != "" {
 			loc.Crs = &crsCode.String
 		}
-		if description.Valid && description.String != "" && loc.FullName == nil {
-			loc.FullName = &description.String
+		if fullName.Valid && fullName.String != "" {
+			loc.FullName = &fullName.String
 		}
+		locations = append(locations, loc)
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, err
-	}
-
-	locations := make([]api_types.Location, 0, len(locationsMap))
-	for _, loc := range locationsMap {
-		locations = append(locations, *loc)
 	}
 
 	return locations, nil

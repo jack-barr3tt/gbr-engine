@@ -797,11 +797,11 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 				}
 
 				timings := map[string]int64{
-					"count_query":    0,
-					"count_cached":   1,
-					"data_query":     dataMs,
+					"count_query":     0,
+					"count_cached":    1,
+					"data_query":      dataMs,
 					"fetch_locations": time.Since(tLocs).Milliseconds(),
-					"gemini":         time.Since(tGemini).Milliseconds(),
+					"gemini":          time.Since(tGemini).Milliseconds(),
 				}
 				timings["total_db"] = time.Since(tTotal).Milliseconds()
 
@@ -1430,17 +1430,7 @@ func (dc *DataClient) fetchScheduleLocations(scheduleIDs ...int) (map[int][]api_
 		return make(map[int][]api_types.ScheduleLocation), nil
 	}
 
-	rows, err := dc.pg.Query(context.Background(), `
-		SELECT sl.schedule_id, sl.id, sl.location_type, sl.tiploc_code,
-			   sl.arrival::text, sl.public_arrival::text,
-			   sl.departure::text, sl.public_departure::text,
-			   sl.platform, sl.location_order,
-			   t.stanox, t.crs_code, t.description
-		FROM schedule_location sl
-		LEFT JOIN tiploc t ON sl.tiploc_code = t.tiploc_code
-		WHERE sl.schedule_id = ANY($1)
-		ORDER BY sl.schedule_id, sl.location_order
-	`, scheduleIDs)
+	rows, err := dc.pg.Query(context.Background(), scheduleLocationsQuery(), scheduleIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1497,14 +1487,33 @@ func (dc *DataClient) fetchScheduleLocations(scheduleIDs ...int) (map[int][]api_
 	return locationsBySchedule, nil
 }
 
+func scheduleLocationsQuery() string {
+	return `
+		SELECT sl.schedule_id, sl.id, sl.location_type, sl.tiploc_code,
+			   sl.arrival::text, sl.public_arrival::text,
+			   sl.departure::text, sl.public_departure::text,
+			   sl.platform, sl.location_order,
+			   t.stanox, t.crs_code, COALESCE(NULLIF(br.description, ''), NULLIF(bl.name, ''), t.description)
+		FROM schedule_location sl
+		LEFT JOIN tiploc t ON sl.tiploc_code = t.tiploc_code
+		LEFT JOIN bplan_loc bl
+		  ON UPPER(TRIM(sl.tiploc_code)) = UPPER(TRIM(bl.tiploc))
+		LEFT JOIN LATERAL (
+			SELECT r.description
+			FROM bplan_ref r
+			WHERE UPPER(TRIM(r.subcode)) = UPPER(TRIM(bl.name))
+			  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+			ORDER BY CASE WHEN r.category = 'LOC' THEN 0 ELSE 1 END, r.id
+			LIMIT 1
+		) br ON TRUE
+		WHERE sl.schedule_id = ANY($1)
+		ORDER BY sl.schedule_id, sl.location_order
+	`
+}
+
 // GetLocationDetails retrieves full location details for a given stanox
 func (dc *DataClient) GetLocationDetails(stanox string) (*api_types.Location, error) {
-	rows, err := dc.pg.Query(context.Background(), `
-		SELECT description, crs_code, tiploc_code FROM tiploc 
-		WHERE stanox = $1
-		ORDER BY tiploc_code
-	`, stanox)
-
+	rows, err := dc.pg.Query(context.Background(), locationDetailsQuery(), stanox)
 	if err != nil {
 		return nil, err
 	}
@@ -1543,6 +1552,25 @@ func (dc *DataClient) GetLocationDetails(stanox string) (*api_types.Location, er
 	}
 
 	return details, nil
+}
+
+func locationDetailsQuery() string {
+	return `
+		SELECT COALESCE(NULLIF(br.description, ''), NULLIF(bl.name, ''), t.description) AS full_name, t.crs_code, t.tiploc_code
+		FROM tiploc t
+		LEFT JOIN bplan_loc bl
+		  ON UPPER(TRIM(t.tiploc_code)) = UPPER(TRIM(bl.tiploc))
+		LEFT JOIN LATERAL (
+			SELECT r.description
+			FROM bplan_ref r
+			WHERE UPPER(TRIM(r.subcode)) = UPPER(TRIM(bl.name))
+			  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+			ORDER BY CASE WHEN r.category = 'LOC' THEN 0 ELSE 1 END, r.id
+			LIMIT 1
+		) br ON TRUE
+		WHERE t.stanox = $1
+		ORDER BY t.tiploc_code
+	`
 }
 
 // isScheduleValidForDate checks if a schedule runs on a specific day of the week
