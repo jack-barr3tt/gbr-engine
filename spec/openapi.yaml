@@ -300,6 +300,10 @@ components:
         train_category:
           type: string
           example: "XX"
+        train_category_description:
+          type: string
+          description: "Human-readable train category description from BPLAN reference data"
+          example: "RfD Freightliner (Contracts)"
         schedule_start_date:
           type: string
           format: date

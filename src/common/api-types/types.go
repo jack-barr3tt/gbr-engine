@@ -161,8 +161,11 @@ type ServiceResponse struct {
 	ScheduleStartDate    *openapi_types.Date `json:"schedule_start_date,omitempty"`
 	SignallingId         string              `json:"signalling_id"`
 	TrainCategory        *string             `json:"train_category,omitempty"`
-	TrainStatus          *string             `json:"train_status,omitempty"`
-	TrainUid             string              `json:"train_uid"`
+
+	// TrainCategoryDescription Human-readable train category description from BPLAN reference data
+	TrainCategoryDescription *string `json:"train_category_description,omitempty"`
+	TrainStatus              *string `json:"train_status,omitempty"`
+	TrainUid                 string  `json:"train_uid"`
 
 	// TrustId TRUST train ID (if activated)
 	TrustId *string `json:"trust_id,omitempty"`

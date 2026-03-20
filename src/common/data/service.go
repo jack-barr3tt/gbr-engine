@@ -277,7 +277,7 @@ func scanServiceRowWithVisitTime(scanner interface {
 	var service api_types.ServiceResponse
 	var scheduleStartDate, scheduleEndDate time.Time
 	var scheduleDaysRuns string
-	var trainCategory, trainStatus, atocCode, tocName sql.NullString
+	var trainCategory, trainCategoryDescription, trainStatus, atocCode, tocName sql.NullString
 	var stpIndicator string
 	var visitTime sql.NullString
 
@@ -287,6 +287,7 @@ func scanServiceRowWithVisitTime(scanner interface {
 		&service.SignallingId,
 		&service.Headcode,
 		&trainCategory,
+		&trainCategoryDescription,
 		&scheduleStartDate,
 		&scheduleEndDate,
 		&scheduleDaysRuns,
@@ -302,6 +303,9 @@ func scanServiceRowWithVisitTime(scanner interface {
 
 	if trainCategory.Valid {
 		service.TrainCategory = &trainCategory.String
+	}
+	if trainCategoryDescription.Valid {
+		service.TrainCategoryDescription = &trainCategoryDescription.String
 	}
 	if trainStatus.Valid {
 		service.TrainStatus = &trainStatus.String
@@ -336,7 +340,7 @@ func scanServiceRow(scanner interface {
 	var service api_types.ServiceResponse
 	var scheduleStartDate, scheduleEndDate time.Time
 	var scheduleDaysRuns string
-	var trainCategory, trainStatus, atocCode, tocName sql.NullString
+	var trainCategory, trainCategoryDescription, trainStatus, atocCode, tocName sql.NullString
 	var stpIndicator string
 
 	err := scanner.Scan(
@@ -345,6 +349,7 @@ func scanServiceRow(scanner interface {
 		&service.SignallingId,
 		&service.Headcode,
 		&trainCategory,
+		&trainCategoryDescription,
 		&scheduleStartDate,
 		&scheduleEndDate,
 		&scheduleDaysRuns,
@@ -359,6 +364,9 @@ func scanServiceRow(scanner interface {
 
 	if trainCategory.Valid {
 		service.TrainCategory = &trainCategory.String
+	}
+	if trainCategoryDescription.Valid {
+		service.TrainCategoryDescription = &trainCategoryDescription.String
 	}
 	if trainStatus.Valid {
 		service.TrainStatus = &trainStatus.String
@@ -622,17 +630,26 @@ func (dc *DataClient) buildPassesThroughQueries(filters ServiceFilters) (countQ 
 	dataQ = fmt.Sprintf(`
 		%s
 		SELECT d.id, d.train_uid, d.signalling_id, d.headcode,
-		       d.train_category, d.schedule_start_date, d.schedule_end_date, d.schedule_days_runs,
+		       d.train_category, d.train_category_description, d.schedule_start_date, d.schedule_end_date, d.schedule_days_runs,
 		       d.train_status, d.atoc_code, d.toc_name, d.stp_indicator,
 		       d.visit_time
 		FROM (
 			SELECT DISTINCT ON (s.train_uid)
 				s.id, s.train_uid, s.signalling_id, s.headcode,
-				s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
+				s.train_category, btr.description AS train_category_description, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
 				s.train_status, s.atoc_code, toc.name AS toc_name, s.stp_indicator,
 				ss0.visit_time
 			FROM %s
 			JOIN schedule s ON s.id = ss0.schedule_id
+			LEFT JOIN LATERAL (
+				SELECT r.description
+				FROM bplan_ref r
+				WHERE r.category = 'TCT'
+				  AND UPPER(TRIM(r.subcode)) = UPPER(TRIM(s.train_category))
+				  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+				ORDER BY r.id
+				LIMIT 1
+			) btr ON TRUE
 			JOIN reference_toc toc ON s.atoc_code = toc.code
 			%s
 			ORDER BY s.train_uid, %s
@@ -680,14 +697,23 @@ func (dc *DataClient) buildScheduleFirstQueries(filters ServiceFilters) (countQ 
 
 	dataQ = fmt.Sprintf(`
 		SELECT d.id, d.train_uid, d.signalling_id, d.headcode,
-		       d.train_category, d.schedule_start_date, d.schedule_end_date, d.schedule_days_runs,
+		       d.train_category, d.train_category_description, d.schedule_start_date, d.schedule_end_date, d.schedule_days_runs,
 		       d.train_status, d.atoc_code, d.toc_name, d.stp_indicator
 		FROM (
 			SELECT DISTINCT ON (s.train_uid)
 				s.id, s.train_uid, s.signalling_id, s.headcode,
-				s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
+				s.train_category, btr.description AS train_category_description, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
 				s.train_status, s.atoc_code, toc.name AS toc_name, s.stp_indicator
 			FROM schedule s
+			LEFT JOIN LATERAL (
+				SELECT r.description
+				FROM bplan_ref r
+				WHERE r.category = 'TCT'
+				  AND UPPER(TRIM(r.subcode)) = UPPER(TRIM(s.train_category))
+				  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+				ORDER BY r.id
+				LIMIT 1
+			) btr ON TRUE
 			JOIN reference_toc toc ON s.atoc_code = toc.code
 			%s
 			ORDER BY s.train_uid, %s
@@ -710,9 +736,18 @@ func (dc *DataClient) fetchServicesByIDs(pageEntries []cachedIDEntry) ([]api_typ
 
 	rows, err := dc.pg.Query(context.Background(), `
 		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
-		       s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
+		       s.train_category, btr.description AS train_category_description, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
 		       s.train_status, s.atoc_code, toc.name AS toc_name, s.stp_indicator
 		FROM schedule s
+		LEFT JOIN LATERAL (
+			SELECT r.description
+			FROM bplan_ref r
+			WHERE r.category = 'TCT'
+			  AND UPPER(TRIM(r.subcode)) = UPPER(TRIM(s.train_category))
+			  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+			ORDER BY r.id
+			LIMIT 1
+		) btr ON TRUE
 		JOIN reference_toc toc ON s.atoc_code = toc.code
 		WHERE s.id = ANY($1)
 	`, ids)
@@ -984,9 +1019,18 @@ func (dc *DataClient) GetServicesWithFilters(filters ServiceFilters) (*ServiceQu
 func (dc *DataClient) GetServiceByUID(uid string, date *time.Time) (*api_types.ServiceResponse, error) {
 	query := `
 		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
-			   s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
+			   s.train_category, btr.description AS train_category_description, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
 			   s.train_status, s.atoc_code, toc.name, s.stp_indicator
 		FROM schedule s
+		LEFT JOIN LATERAL (
+			SELECT r.description
+			FROM bplan_ref r
+			WHERE r.category = 'TCT'
+			  AND UPPER(TRIM(r.subcode)) = UPPER(TRIM(s.train_category))
+			  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+			ORDER BY r.id
+			LIMIT 1
+		) btr ON TRUE
 		JOIN reference_toc toc ON s.atoc_code = toc.code
 		WHERE s.train_uid = $1
 	`
@@ -1027,9 +1071,18 @@ func (dc *DataClient) GetServiceByUID(uid string, date *time.Time) (*api_types.S
 func (dc *DataClient) GetServiceByID(id int, date time.Time) (*api_types.ServiceResponse, error) {
 	query := `
 		SELECT s.id, s.train_uid, s.signalling_id, s.headcode,
-			   s.train_category, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
+			   s.train_category, btr.description AS train_category_description, s.schedule_start_date, s.schedule_end_date, s.schedule_days_runs,
 			   s.train_status, s.atoc_code, toc.name, s.stp_indicator
 		FROM schedule s
+		LEFT JOIN LATERAL (
+			SELECT r.description
+			FROM bplan_ref r
+			WHERE r.category = 'TCT'
+			  AND UPPER(TRIM(r.subcode)) = UPPER(TRIM(s.train_category))
+			  AND NULLIF(TRIM(r.description), '') IS NOT NULL
+			ORDER BY r.id
+			LIMIT 1
+		) btr ON TRUE
 		JOIN reference_toc toc ON s.atoc_code = toc.code
 		WHERE s.id = $1
 	`

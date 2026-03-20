@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jack-barr3tt/gbr-engine/src/common/utils"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -20,6 +21,15 @@ const (
 )
 
 var errNoTxtFile = errors.New("no .txt file found in data directory")
+
+func hasBplanRefData(ctx context.Context, pg *pgxpool.Pool) (bool, error) {
+	var exists bool
+	err := pg.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM bplan_ref LIMIT 1)`).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
 
 // findFirstTxtFile returns the path to the first .txt file in dir (by name order), or an error if dir is missing or contains no .txt files.
 func findFirstTxtFile(dir string) (string, error) {
@@ -84,8 +94,15 @@ func main() {
 		if b, err := os.ReadFile(statePath); err == nil {
 			var stored time.Time
 			if err := stored.UnmarshalText(b); err == nil && stored.Equal(datasetMod) {
-				needParse = false
-				log.Infow("dataset unchanged, skipping parse", "path", datasetPath)
+				hasData, hasDataErr := hasBplanRefData(context.Background(), pg)
+				if hasDataErr != nil {
+					log.Warnw("could not verify BPLAN table population; forcing parse", "error", hasDataErr)
+				} else if hasData {
+					needParse = false
+					log.Infow("dataset unchanged, skipping parse", "path", datasetPath)
+				} else {
+					log.Warnw("dataset unchanged but bplan_ref is empty; forcing parse", "path", datasetPath)
+				}
 			}
 		}
 
